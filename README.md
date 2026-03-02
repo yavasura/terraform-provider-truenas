@@ -59,7 +59,7 @@ Full documentation is available on the [Terraform Registry](https://registry.ter
 
 ## Support
 
-Need help deploying terraform-provider-truenas at your org? I offer implementation support, custom development, and training through my consultancy: [simonhartcher.com](https://simonhartcher.com). Email in bio.
+Need help managing your TrueNAS infrastructure with Terraform? I offer implementation support, custom development, and training through my consultancy: [simonhartcher.com](https://simonhartcher.com). Email in bio.
 
 ## License
 
