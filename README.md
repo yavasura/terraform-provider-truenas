@@ -1,7 +1,6 @@
 # Terraform Provider for TrueNAS
 
-[![Terraform Registry](https://img.shields.io/badge/terraform-registry-blueviolet?logo=terraform)](https://registry.terraform.io/providers/deevus/truenas/latest)
-[![Terraform Provider Downloads](https://img.shields.io/terraform/provider/downloads/deevus/truenas)](https://registry.terraform.io/providers/deevus/truenas/latest)
+[![Terraform Provider Downloads](https://img.shields.io/terraform/provider/dt/1361211)](https://registry.terraform.io/providers/deevus/truenas/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/deevus/terraform-provider-truenas)](https://github.com/deevus/terraform-provider-truenas/releases)
 [![Go](https://img.shields.io/github/go-mod/go-version/deevus/terraform-provider-truenas)](go.mod)
