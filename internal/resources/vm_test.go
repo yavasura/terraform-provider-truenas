@@ -880,14 +880,16 @@ func TestVMResource_Update_TopLevel(t *testing.T) {
 // -- Delete tests --
 
 func TestVMResource_Delete_Stopped(t *testing.T) {
-	var methods []string
-
 	r := &VMResource{
 		BaseResource: BaseResource{services: &services.TrueNASServices{VM: &truenas.MockVMService{
 			GetVMFunc: func(ctx context.Context, id int64) (*truenas.VM, error) {
 				return mockVM(1, "test-vm", 2048, "STOPPED"), nil
 			},
 			DeleteVMFunc: func(ctx context.Context, id int64) error {
+				return nil
+			},
+			StopVMFunc: func(ctx context.Context, id int64, opts truenas.StopVMOpts) error {
+				t.Error("should not call vm.stop for stopped VM")
 				return nil
 			},
 		}}},
@@ -906,13 +908,6 @@ func TestVMResource_Delete_Stopped(t *testing.T) {
 
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
-	}
-
-	// Should not call vm.stop
-	for _, m := range methods {
-		if m == "vm.stop" {
-			t.Error("should not call vm.stop for stopped VM")
-		}
 	}
 }
 
