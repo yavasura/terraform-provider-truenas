@@ -362,6 +362,68 @@ func createAppResourceModelValueWithTriggers(
 	})
 }
 
+func createAppResourceModelWithUnknownComposeConfig(id, name interface{}, customApp bool, desiredState interface{}, stateTimeout interface{}) tftypes.Value {
+	return tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"id":                           tftypes.String,
+			"name":                         tftypes.String,
+			"custom_app":                   tftypes.Bool,
+			"catalog_app":                  tftypes.String,
+			"train":                        tftypes.String,
+			"version":                      tftypes.String,
+			"values":                       tftypes.DynamicPseudoType,
+			"custom_compose_config":        tftypes.DynamicPseudoType,
+			"custom_compose_config_string": tftypes.String,
+			"compose_config":               tftypes.String,
+			"desired_state":                tftypes.String,
+			"state_timeout":                tftypes.Number,
+			"state":                        tftypes.String,
+			"upgrade_available":            tftypes.Bool,
+			"latest_version":               tftypes.String,
+			"latest_app_version":           tftypes.String,
+			"image_updates_available":      tftypes.Bool,
+			"migrated":                     tftypes.Bool,
+			"human_version":                tftypes.String,
+			"installed_version":            tftypes.String,
+			"metadata":                     tftypes.DynamicPseudoType,
+			"active_workloads":             tftypes.DynamicPseudoType,
+			"notes":                        tftypes.String,
+			"portals":                      tftypes.DynamicPseudoType,
+			"version_details":              tftypes.DynamicPseudoType,
+			"config":                       tftypes.DynamicPseudoType,
+			"restart_triggers":             tftypes.Map{ElementType: tftypes.String},
+		},
+	}, map[string]tftypes.Value{
+		"id":                           tftypes.NewValue(tftypes.String, id),
+		"name":                         tftypes.NewValue(tftypes.String, name),
+		"custom_app":                   tftypes.NewValue(tftypes.Bool, customApp),
+		"catalog_app":                  tftypes.NewValue(tftypes.String, nil),
+		"train":                        tftypes.NewValue(tftypes.String, nil),
+		"version":                      tftypes.NewValue(tftypes.String, nil),
+		"values":                       tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"custom_compose_config":        tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"custom_compose_config_string": tftypes.NewValue(tftypes.String, nil),
+		"compose_config":               tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+		"desired_state":                tftypes.NewValue(tftypes.String, desiredState),
+		"state_timeout":                tftypes.NewValue(tftypes.Number, stateTimeout),
+		"state":                        tftypes.NewValue(tftypes.String, nil),
+		"upgrade_available":            tftypes.NewValue(tftypes.Bool, nil),
+		"latest_version":               tftypes.NewValue(tftypes.String, nil),
+		"latest_app_version":           tftypes.NewValue(tftypes.String, nil),
+		"image_updates_available":      tftypes.NewValue(tftypes.Bool, nil),
+		"migrated":                     tftypes.NewValue(tftypes.Bool, nil),
+		"human_version":                tftypes.NewValue(tftypes.String, nil),
+		"installed_version":            tftypes.NewValue(tftypes.String, nil),
+		"metadata":                     tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"active_workloads":             tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"notes":                        tftypes.NewValue(tftypes.String, nil),
+		"portals":                      tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"version_details":              tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"config":                       tftypes.NewValue(tftypes.DynamicPseudoType, nil),
+		"restart_triggers":             tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+	})
+}
+
 func TestAppResource_Create_Success(t *testing.T) {
 	var capturedOpts truenas.CreateAppOpts
 
@@ -424,6 +486,27 @@ func TestAppResource_Create_Success(t *testing.T) {
 
 	if model.State.ValueString() != "RUNNING" {
 		t.Errorf("expected State 'RUNNING', got %q", model.State.ValueString())
+	}
+}
+
+func TestAppResource_ValidateConfig_AllowsUnknownCustomComposeConfig(t *testing.T) {
+	r := NewAppResource().(*AppResource)
+	schemaResp := getAppResourceSchema(t)
+
+	configValue := createAppResourceModelWithUnknownComposeConfig(nil, "myapp", true, "RUNNING", float64(120))
+
+	req := resource.ValidateConfigRequest{
+		Config: tfsdk.Config{
+			Schema: schemaResp.Schema,
+			Raw:    configValue,
+		},
+	}
+	resp := &resource.ValidateConfigResponse{}
+
+	r.ValidateConfig(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("validation should pass with unknown compose config, got errors: %v", resp.Diagnostics)
 	}
 }
 
@@ -731,6 +814,193 @@ func TestAppResource_Update_Success(t *testing.T) {
 	// Verify GetApp was called to get state after update
 	if !getAppCalled {
 		t.Error("expected GetApp to be called to query state after update")
+	}
+}
+
+func TestAppResource_Update_RefreshesComputedFieldsFromAPI(t *testing.T) {
+	r := &AppResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{
+			App: &truenas.MockAppService{
+				UpdateAppFunc: func(ctx context.Context, name string, opts truenas.UpdateAppOpts) (*truenas.App, error) {
+					return &truenas.App{
+						Name:      "minio",
+						State:     "RUNNING",
+						CustomApp: false,
+					}, nil
+				},
+				GetAppFunc: func(ctx context.Context, name string) (*truenas.App, error) {
+					return &truenas.App{
+						Name:  "minio",
+						State: "RUNNING",
+					}, nil
+				},
+				GetAppWithConfigFunc: func(ctx context.Context, name string) (*truenas.App, error) {
+					return &truenas.App{
+						Name:             "minio",
+						State:            "RUNNING",
+						CustomApp:        false,
+						Version:          "2026.1.0",
+						HumanVersion:     "2026.1.0_1.0.0",
+						UpgradeAvailable: true,
+						LatestVersion:    "2026.2.0",
+						Config: map[string]any{
+							"resources": map[string]any{
+								"limits": map[string]any{
+									"memory": int64(4096),
+								},
+							},
+						},
+					}, nil
+				},
+			},
+		}},
+	}
+
+	schemaResp := getAppResourceSchema(t)
+	stateValues := types.DynamicValue(types.ObjectValueMust(
+		map[string]attr.Type{
+			"resources": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"limits": types.ObjectType{AttrTypes: map[string]attr.Type{
+					"memory": types.Int64Type,
+				}},
+			}},
+		},
+		map[string]attr.Value{
+			"resources": types.ObjectValueMust(
+				map[string]attr.Type{
+					"limits": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"memory": types.Int64Type,
+					}},
+				},
+				map[string]attr.Value{
+					"limits": types.ObjectValueMust(
+						map[string]attr.Type{"memory": types.Int64Type},
+						map[string]attr.Value{"memory": types.Int64Value(2048)},
+					),
+				},
+			),
+		},
+	))
+	plannedValues := types.DynamicValue(types.ObjectValueMust(
+		map[string]attr.Type{
+			"resources": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"limits": types.ObjectType{AttrTypes: map[string]attr.Type{
+					"memory": types.Int64Type,
+				}},
+			}},
+		},
+		map[string]attr.Value{
+			"resources": types.ObjectValueMust(
+				map[string]attr.Type{
+					"limits": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"memory": types.Int64Type,
+					}},
+				},
+				map[string]attr.Value{
+					"limits": types.ObjectValueMust(
+						map[string]attr.Type{"memory": types.Int64Type},
+						map[string]attr.Value{"memory": types.Int64Value(4096)},
+					),
+				},
+			),
+		},
+	))
+
+	state := tfsdk.State{Schema: schemaResp.Schema}
+	diags := state.Set(context.Background(), &AppResourceModel{
+		ID:              types.StringValue("minio"),
+		Name:            types.StringValue("minio"),
+		CustomApp:       types.BoolValue(false),
+		CatalogApp:      types.StringValue("minio"),
+		Train:           types.StringValue("stable"),
+		Version:         types.StringValue("latest"),
+		Values:          stateValues,
+		DesiredState:    customtypes.NewCaseInsensitiveStringValue("RUNNING"),
+		StateTimeout:    types.Int64Value(120),
+		State:           types.StringValue("RUNNING"),
+		RestartTriggers: types.MapNull(types.StringType),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+
+	planState := tfsdk.State{Schema: schemaResp.Schema}
+	diags = planState.Set(context.Background(), &AppResourceModel{
+		ID:              types.StringValue("minio"),
+		Name:            types.StringValue("minio"),
+		CustomApp:       types.BoolValue(false),
+		CatalogApp:      types.StringValue("minio"),
+		Train:           types.StringValue("stable"),
+		Version:         types.StringValue("latest"),
+		Values:          plannedValues,
+		DesiredState:    customtypes.NewCaseInsensitiveStringValue("RUNNING"),
+		StateTimeout:    types.Int64Value(120),
+		State:           types.StringValue("RUNNING"),
+		RestartTriggers: types.MapNull(types.StringType),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	req := resource.UpdateRequest{
+		State: state,
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planState.Raw,
+		},
+	}
+	resp := &resource.UpdateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Update(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var model AppResourceModel
+	diags = resp.State.Get(context.Background(), &model)
+	if diags.HasError() {
+		t.Fatalf("failed to get state: %v", diags)
+	}
+
+	if model.InstalledVersion.ValueString() != "2026.1.0" {
+		t.Fatalf("expected installed version to be refreshed, got %q", model.InstalledVersion.ValueString())
+	}
+	if model.HumanVersion.ValueString() != "2026.1.0_1.0.0" {
+		t.Fatalf("expected human version to be refreshed, got %q", model.HumanVersion.ValueString())
+	}
+	if !model.UpgradeAvailable.ValueBool() {
+		t.Fatal("expected upgrade_available to be refreshed")
+	}
+	if model.LatestVersion.ValueString() != "2026.2.0" {
+		t.Fatalf("expected latest version to be refreshed, got %q", model.LatestVersion.ValueString())
+	}
+	if model.Config.IsNull() {
+		t.Fatal("expected computed config to be refreshed")
+	}
+
+	valuesObj, ok := model.Values.UnderlyingValue().(types.Object)
+	if !ok {
+		t.Fatalf("expected planned values object, got %T", model.Values.UnderlyingValue())
+	}
+	resourcesVal, ok := valuesObj.Attributes()["resources"].(types.Object)
+	if !ok {
+		t.Fatalf("expected resources object, got %T", valuesObj.Attributes()["resources"])
+	}
+	limitsVal, ok := resourcesVal.Attributes()["limits"].(types.Object)
+	if !ok {
+		t.Fatalf("expected limits object, got %T", resourcesVal.Attributes()["limits"])
+	}
+	memoryVal, ok := limitsVal.Attributes()["memory"].(types.Number)
+	if !ok {
+		t.Fatalf("expected memory number, got %T", limitsVal.Attributes()["memory"])
+	}
+	if memoryVal.ValueBigFloat().Text('f', 0) != "4096" {
+		t.Fatalf("expected planned values to be preserved, got %s", memoryVal.ValueBigFloat().Text('f', 0))
 	}
 }
 
