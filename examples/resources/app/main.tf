@@ -3,7 +3,7 @@ resource "truenas_app" "nginx" {
   name       = "nginx"
   custom_app = true
 
-  compose_config = <<-EOT
+  custom_compose_config_string = <<-EOT
     services:
       nginx:
         image: nginx:latest

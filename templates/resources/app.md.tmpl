@@ -35,7 +35,7 @@ resource "truenas_app" "example" {
   name       = "my-app"
   custom_app = true
 
-  compose_config = <<-EOF
+  custom_compose_config_string = <<-EOF
     services:
       web:
         image: nginx:latest
@@ -51,6 +51,26 @@ resource "truenas_app" "example" {
 ```
 
 > **Note:** Adding or removing `restart_triggers` does not trigger a restart. Only changes to existing trigger values cause the app to restart.
+
+### Catalog App
+
+```terraform
+resource "truenas_app" "plex" {
+  name        = "plex"
+  custom_app  = false
+  catalog_app = "plex"
+  train       = "stable"
+  version     = "latest"
+
+  values = {
+    resources = {
+      limits = {
+        cpu = 2
+      }
+    }
+  }
+}
+```
 
 ## Import
 
