@@ -28,6 +28,12 @@ var _ resource.ResourceWithValidateConfig = &AppResource{}
 
 var appNameRegexp = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
+const (
+	defaultAppTrain        = "stable"
+	defaultAppVersion      = "latest"
+	defaultAppStateTimeout = 120 * time.Second
+)
+
 // AppResource defines the resource implementation.
 type AppResource struct {
 	BaseResource
@@ -62,6 +68,19 @@ type AppResourceModel struct {
 	VersionDetails            types.Dynamic                          `tfsdk:"version_details"`
 	Config                    types.Dynamic                          `tfsdk:"config"`
 	RestartTriggers           types.Map                              `tfsdk:"restart_triggers"`
+}
+
+type appUserStateSnapshot struct {
+	DesiredState              customtypes.CaseInsensitiveStringValue
+	StateTimeout              types.Int64
+	RestartTriggers           types.Map
+	CatalogApp                types.String
+	Train                     types.String
+	Version                   types.String
+	Values                    types.Dynamic
+	CustomComposeConfig       types.Dynamic
+	CustomComposeConfigString customtypes.YAMLStringValue
+	ComposeConfig             customtypes.YAMLStringValue
 }
 
 // NewAppResource creates a new AppResource.
@@ -305,13 +324,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	appName := data.Name.ValueString()
 	plannedValues := data.Values
-
-	if data.Train.IsNull() || data.Train.IsUnknown() || data.Train.ValueString() == "" {
-		data.Train = types.StringValue("stable")
-	}
-	if data.Version.IsNull() || data.Version.IsUnknown() || data.Version.ValueString() == "" {
-		data.Version = types.StringValue("latest")
-	}
+	applyCreateDefaults(&data)
 
 	app, err := r.createAppEntry(ctx, &data)
 	if err != nil {
@@ -334,10 +347,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	normalizedDesired := normalizeDesiredState(desiredState)
 
 	if app.State != normalizedDesired {
-		timeout := time.Duration(data.StateTimeout.ValueInt64()) * time.Second
-		if timeout == 0 {
-			timeout = 120 * time.Second
-		}
+		timeout := appStateTimeout(data.StateTimeout)
 
 		// For Create, we don't warn about drift - it's expected that we may need to stop
 		if normalizedDesired == AppStateRunning {
@@ -357,12 +367,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			return
 		}
 
-		// Wait for stable state and query final state
-		queryFunc := func(ctx context.Context, n string) (string, error) {
-			return r.queryAppState(ctx, n)
-		}
-
-		finalState, err := waitForStableState(ctx, appName, timeout, queryFunc)
+		finalState, err := r.waitForAppStableState(ctx, appName, timeout)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Timeout Waiting for App State",
@@ -376,9 +381,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// Preserve user's original desired_state value (semantic equality handles case differences)
 	// Only set if it was empty (defaulting to RUNNING)
-	if data.DesiredState.IsNull() || data.DesiredState.ValueString() == "" {
-		data.DesiredState = customtypes.NewCaseInsensitiveStringValue(AppStateRunning)
-	}
+	data.DesiredState = defaultDesiredStateValue(data.DesiredState, AppStateRunning)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -393,14 +396,7 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	// Preserve user-specified values from prior state (these are not returned by API)
-	priorDesiredState := data.DesiredState
-	priorStateTimeout := data.StateTimeout
-	priorRestartTriggers := data.RestartTriggers
-	priorCatalogApp := data.CatalogApp
-	priorTrain := data.Train
-	priorVersion := data.Version
-	priorValues := data.Values
+	prior := snapshotAppUserState(data)
 
 	// Use the name to query the app
 	appName := data.Name.ValueString()
@@ -422,27 +418,7 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 
 	r.syncAppStateToModel(&data, app, false)
-
-	// Restore user-specified values from prior state
-	data.DesiredState = priorDesiredState
-	data.StateTimeout = priorStateTimeout
-	data.RestartTriggers = priorRestartTriggers
-	data.CatalogApp = priorCatalogApp
-	data.Train = priorTrain
-	data.Version = priorVersion
-	if !priorValues.IsNull() && !priorValues.IsUnknown() {
-		data.Values = priorValues
-	}
-
-	// Default desired_state if null/unknown (e.g., after import)
-	if data.DesiredState.IsNull() || data.DesiredState.IsUnknown() {
-		data.DesiredState = customtypes.NewCaseInsensitiveStringValue(app.State)
-	}
-
-	// Default state_timeout if null/unknown
-	if data.StateTimeout.IsNull() || data.StateTimeout.IsUnknown() {
-		data.StateTimeout = types.Int64Value(120)
-	}
+	prior.restoreRead(&data, app.State)
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -465,16 +441,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	appName := data.Name.ValueString()
-	plannedDesiredState := data.DesiredState
-	plannedStateTimeout := data.StateTimeout
-	plannedRestartTriggers := data.RestartTriggers
-	plannedCatalogApp := data.CatalogApp
-	plannedTrain := data.Train
-	plannedVersion := data.Version
-	plannedValues := data.Values
-	plannedCustomComposeConfig := data.CustomComposeConfig
-	plannedCustomComposeConfigString := data.CustomComposeConfigString
-	plannedComposeConfig := data.ComposeConfig
+	planned := snapshotAppUserState(data)
 
 	// Handle compose_config changes first (if any)
 	composeConfigChanged := !data.Values.Equal(stateData.Values) ||
@@ -507,18 +474,11 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// Get timeout from plan
-	timeout := time.Duration(data.StateTimeout.ValueInt64()) * time.Second
-	if timeout == 0 {
-		timeout = 120 * time.Second
-	}
+	timeout := appStateTimeout(data.StateTimeout)
 
 	// Wait for transitional states to complete before reconciling
 	if !isStableState(currentState) {
-		queryFunc := func(ctx context.Context, n string) (string, error) {
-			return r.queryAppState(ctx, n)
-		}
-
-		stableState, err := waitForStableState(ctx, appName, timeout, queryFunc)
+		stableState, err := r.waitForAppStableState(ctx, appName, timeout)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Timeout Waiting for App State",
@@ -550,12 +510,7 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 			return
 		}
 
-		// Wait for stable state after restart
-		queryFunc := func(ctx context.Context, n string) (string, error) {
-			return r.queryAppState(ctx, n)
-		}
-
-		stableState, err := waitForStableState(ctx, appName, timeout, queryFunc)
+		stableState, err := r.waitForAppStableState(ctx, appName, timeout)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Timeout Waiting for App State After Restart",
@@ -611,34 +566,82 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	r.syncAppStateToModel(&data, app, true)
-	data.DesiredState = reqPlanDesiredStateOrDefault(plannedDesiredState)
-	data.StateTimeout = reqPlanStateTimeoutOrDefault(plannedStateTimeout)
-	data.RestartTriggers = plannedRestartTriggers
-	data.CatalogApp = plannedCatalogApp
-	data.Train = plannedTrain
-	data.Version = plannedVersion
-	data.Values = plannedValues
-	data.CustomComposeConfig = plannedCustomComposeConfig
-	data.CustomComposeConfigString = plannedCustomComposeConfigString
-	data.ComposeConfig = plannedComposeConfig
+	planned.restoreUpdate(&data)
 	data.State = types.StringValue(currentState)
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func reqPlanDesiredStateOrDefault(value customtypes.CaseInsensitiveStringValue) customtypes.CaseInsensitiveStringValue {
+func defaultDesiredStateValue(value customtypes.CaseInsensitiveStringValue, fallback string) customtypes.CaseInsensitiveStringValue {
 	if value.IsNull() || value.IsUnknown() || value.ValueString() == "" {
-		return customtypes.NewCaseInsensitiveStringValue(AppStateRunning)
+		return customtypes.NewCaseInsensitiveStringValue(fallback)
 	}
 	return value
 }
 
-func reqPlanStateTimeoutOrDefault(value types.Int64) types.Int64 {
+func appStateTimeout(value types.Int64) time.Duration {
 	if value.IsNull() || value.IsUnknown() || value.ValueInt64() == 0 {
-		return types.Int64Value(120)
+		return defaultAppStateTimeout
 	}
-	return value
+	return time.Duration(value.ValueInt64()) * time.Second
+}
+
+func applyCreateDefaults(data *AppResourceModel) {
+	if data.Train.IsNull() || data.Train.IsUnknown() || data.Train.ValueString() == "" {
+		data.Train = types.StringValue(defaultAppTrain)
+	}
+	if data.Version.IsNull() || data.Version.IsUnknown() || data.Version.ValueString() == "" {
+		data.Version = types.StringValue(defaultAppVersion)
+	}
+}
+
+func snapshotAppUserState(data AppResourceModel) appUserStateSnapshot {
+	return appUserStateSnapshot{
+		DesiredState:              data.DesiredState,
+		StateTimeout:              data.StateTimeout,
+		RestartTriggers:           data.RestartTriggers,
+		CatalogApp:                data.CatalogApp,
+		Train:                     data.Train,
+		Version:                   data.Version,
+		Values:                    data.Values,
+		CustomComposeConfig:       data.CustomComposeConfig,
+		CustomComposeConfigString: data.CustomComposeConfigString,
+		ComposeConfig:             data.ComposeConfig,
+	}
+}
+
+func (s appUserStateSnapshot) restoreRead(data *AppResourceModel, fallbackDesiredState string) {
+	data.DesiredState = defaultDesiredStateValue(s.DesiredState, fallbackDesiredState)
+	if s.StateTimeout.IsNull() || s.StateTimeout.IsUnknown() {
+		data.StateTimeout = types.Int64Value(int64(defaultAppStateTimeout / time.Second))
+	} else {
+		data.StateTimeout = s.StateTimeout
+	}
+	data.RestartTriggers = s.RestartTriggers
+	data.CatalogApp = s.CatalogApp
+	data.Train = s.Train
+	data.Version = s.Version
+	if !s.Values.IsNull() && !s.Values.IsUnknown() {
+		data.Values = s.Values
+	}
+}
+
+func (s appUserStateSnapshot) restoreUpdate(data *AppResourceModel) {
+	data.DesiredState = defaultDesiredStateValue(s.DesiredState, AppStateRunning)
+	if s.StateTimeout.IsNull() || s.StateTimeout.IsUnknown() || s.StateTimeout.ValueInt64() == 0 {
+		data.StateTimeout = types.Int64Value(int64(defaultAppStateTimeout / time.Second))
+	} else {
+		data.StateTimeout = s.StateTimeout
+	}
+	data.RestartTriggers = s.RestartTriggers
+	data.CatalogApp = s.CatalogApp
+	data.Train = s.Train
+	data.Version = s.Version
+	data.Values = s.Values
+	data.CustomComposeConfig = s.CustomComposeConfig
+	data.CustomComposeConfigString = s.CustomComposeConfigString
+	data.ComposeConfig = s.ComposeConfig
 }
 
 func (r *AppResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -680,6 +683,10 @@ func (r *AppResource) queryAppState(ctx context.Context, name string) (string, e
 	}
 
 	return app.State, nil
+}
+
+func (r *AppResource) waitForAppStableState(ctx context.Context, name string, timeout time.Duration) (string, error) {
+	return waitForStableState(ctx, name, timeout, r.queryAppState)
 }
 
 func (r *AppResource) syncAppStateToModel(data *AppResourceModel, app *appEntryResponse, preserveVersionSelector bool) {
@@ -794,12 +801,7 @@ func (r *AppResource) reconcileDesiredState(
 		}
 	}
 
-	// Wait for stable state
-	queryFunc := func(ctx context.Context, n string) (string, error) {
-		return r.queryAppState(ctx, n)
-	}
-
-	finalState, err := waitForStableState(ctx, name, timeout, queryFunc)
+	finalState, err := r.waitForAppStableState(ctx, name, timeout)
 	if err != nil {
 		return err
 	}
