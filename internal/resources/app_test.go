@@ -172,6 +172,9 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 	}
 
 	dynamicValue := func(v interface{}) tftypes.Value {
+		if v == tftypes.UnknownValue {
+			return tftypes.NewValue(tftypes.DynamicPseudoType, tftypes.UnknownValue)
+		}
 		if v == nil {
 			return tftypes.NewValue(tftypes.DynamicPseudoType, nil)
 		}
@@ -184,6 +187,27 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 		default:
 			return tftypes.NewValue(tftypes.DynamicPseudoType, val)
 		}
+	}
+
+	stringValue := func(v interface{}) tftypes.Value {
+		if v == tftypes.UnknownValue {
+			return tftypes.NewValue(tftypes.String, tftypes.UnknownValue)
+		}
+		return tftypes.NewValue(tftypes.String, v)
+	}
+
+	numberValue := func(v interface{}) tftypes.Value {
+		if v == tftypes.UnknownValue {
+			return tftypes.NewValue(tftypes.Number, tftypes.UnknownValue)
+		}
+		return tftypes.NewValue(tftypes.Number, v)
+	}
+
+	boolValue := func(v interface{}) tftypes.Value {
+		if v == tftypes.UnknownValue {
+			return tftypes.NewValue(tftypes.Bool, tftypes.UnknownValue)
+		}
+		return tftypes.NewValue(tftypes.Bool, v)
 	}
 
 	return tftypes.NewValue(tftypes.Object{
@@ -217,29 +241,29 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 			"restart_triggers":             tftypes.Map{ElementType: tftypes.String},
 		},
 	}, map[string]tftypes.Value{
-		"id":                           tftypes.NewValue(tftypes.String, p.ID),
-		"name":                         tftypes.NewValue(tftypes.String, p.Name),
-		"custom_app":                   tftypes.NewValue(tftypes.Bool, p.CustomApp),
-		"catalog_app":                  tftypes.NewValue(tftypes.String, p.CatalogApp),
-		"train":                        tftypes.NewValue(tftypes.String, p.Train),
-		"version":                      tftypes.NewValue(tftypes.String, p.Version),
+		"id":                           stringValue(p.ID),
+		"name":                         stringValue(p.Name),
+		"custom_app":                   boolValue(p.CustomApp),
+		"catalog_app":                  stringValue(p.CatalogApp),
+		"train":                        stringValue(p.Train),
+		"version":                      stringValue(p.Version),
 		"values":                       dynamicValue(p.Values),
 		"custom_compose_config":        dynamicValue(p.CustomComposeConfig),
-		"custom_compose_config_string": tftypes.NewValue(tftypes.String, p.CustomComposeConfigString),
-		"compose_config":               tftypes.NewValue(tftypes.String, p.ComposeConfig),
-		"desired_state":                tftypes.NewValue(tftypes.String, p.DesiredState),
-		"state_timeout":                tftypes.NewValue(tftypes.Number, p.StateTimeout),
-		"state":                        tftypes.NewValue(tftypes.String, p.State),
-		"upgrade_available":            tftypes.NewValue(tftypes.Bool, p.UpgradeAvailable),
-		"latest_version":               tftypes.NewValue(tftypes.String, p.LatestVersion),
-		"latest_app_version":           tftypes.NewValue(tftypes.String, p.LatestAppVersion),
-		"image_updates_available":      tftypes.NewValue(tftypes.Bool, p.ImageUpdatesAvailable),
-		"migrated":                     tftypes.NewValue(tftypes.Bool, p.Migrated),
-		"human_version":                tftypes.NewValue(tftypes.String, p.HumanVersion),
-		"installed_version":            tftypes.NewValue(tftypes.String, p.InstalledVersion),
+		"custom_compose_config_string": stringValue(p.CustomComposeConfigString),
+		"compose_config":               stringValue(p.ComposeConfig),
+		"desired_state":                stringValue(p.DesiredState),
+		"state_timeout":                numberValue(p.StateTimeout),
+		"state":                        stringValue(p.State),
+		"upgrade_available":            boolValue(p.UpgradeAvailable),
+		"latest_version":               stringValue(p.LatestVersion),
+		"latest_app_version":           stringValue(p.LatestAppVersion),
+		"image_updates_available":      boolValue(p.ImageUpdatesAvailable),
+		"migrated":                     boolValue(p.Migrated),
+		"human_version":                stringValue(p.HumanVersion),
+		"installed_version":            stringValue(p.InstalledVersion),
 		"metadata":                     dynamicValue(p.Metadata),
 		"active_workloads":             dynamicValue(p.ActiveWorkloads),
-		"notes":                        tftypes.NewValue(tftypes.String, p.Notes),
+		"notes":                        stringValue(p.Notes),
 		"portals":                      dynamicValue(p.Portals),
 		"version_details":              dynamicValue(p.VersionDetails),
 		"config":                       dynamicValue(p.Config),
@@ -362,68 +386,6 @@ func createAppResourceModelValueWithTriggers(
 	})
 }
 
-func createAppResourceModelWithUnknownComposeConfig(id, name interface{}, customApp bool, desiredState interface{}, stateTimeout interface{}) tftypes.Value {
-	return tftypes.NewValue(tftypes.Object{
-		AttributeTypes: map[string]tftypes.Type{
-			"id":                           tftypes.String,
-			"name":                         tftypes.String,
-			"custom_app":                   tftypes.Bool,
-			"catalog_app":                  tftypes.String,
-			"train":                        tftypes.String,
-			"version":                      tftypes.String,
-			"values":                       tftypes.DynamicPseudoType,
-			"custom_compose_config":        tftypes.DynamicPseudoType,
-			"custom_compose_config_string": tftypes.String,
-			"compose_config":               tftypes.String,
-			"desired_state":                tftypes.String,
-			"state_timeout":                tftypes.Number,
-			"state":                        tftypes.String,
-			"upgrade_available":            tftypes.Bool,
-			"latest_version":               tftypes.String,
-			"latest_app_version":           tftypes.String,
-			"image_updates_available":      tftypes.Bool,
-			"migrated":                     tftypes.Bool,
-			"human_version":                tftypes.String,
-			"installed_version":            tftypes.String,
-			"metadata":                     tftypes.DynamicPseudoType,
-			"active_workloads":             tftypes.DynamicPseudoType,
-			"notes":                        tftypes.String,
-			"portals":                      tftypes.DynamicPseudoType,
-			"version_details":              tftypes.DynamicPseudoType,
-			"config":                       tftypes.DynamicPseudoType,
-			"restart_triggers":             tftypes.Map{ElementType: tftypes.String},
-		},
-	}, map[string]tftypes.Value{
-		"id":                           tftypes.NewValue(tftypes.String, id),
-		"name":                         tftypes.NewValue(tftypes.String, name),
-		"custom_app":                   tftypes.NewValue(tftypes.Bool, customApp),
-		"catalog_app":                  tftypes.NewValue(tftypes.String, nil),
-		"train":                        tftypes.NewValue(tftypes.String, nil),
-		"version":                      tftypes.NewValue(tftypes.String, nil),
-		"values":                       tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"custom_compose_config":        tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"custom_compose_config_string": tftypes.NewValue(tftypes.String, nil),
-		"compose_config":               tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
-		"desired_state":                tftypes.NewValue(tftypes.String, desiredState),
-		"state_timeout":                tftypes.NewValue(tftypes.Number, stateTimeout),
-		"state":                        tftypes.NewValue(tftypes.String, nil),
-		"upgrade_available":            tftypes.NewValue(tftypes.Bool, nil),
-		"latest_version":               tftypes.NewValue(tftypes.String, nil),
-		"latest_app_version":           tftypes.NewValue(tftypes.String, nil),
-		"image_updates_available":      tftypes.NewValue(tftypes.Bool, nil),
-		"migrated":                     tftypes.NewValue(tftypes.Bool, nil),
-		"human_version":                tftypes.NewValue(tftypes.String, nil),
-		"installed_version":            tftypes.NewValue(tftypes.String, nil),
-		"metadata":                     tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"active_workloads":             tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"notes":                        tftypes.NewValue(tftypes.String, nil),
-		"portals":                      tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"version_details":              tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"config":                       tftypes.NewValue(tftypes.DynamicPseudoType, nil),
-		"restart_triggers":             tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
-	})
-}
-
 func TestAppResource_Create_Success(t *testing.T) {
 	var capturedOpts truenas.CreateAppOpts
 
@@ -493,7 +455,13 @@ func TestAppResource_ValidateConfig_AllowsUnknownCustomComposeConfig(t *testing.
 	r := NewAppResource().(*AppResource)
 	schemaResp := getAppResourceSchema(t)
 
-	configValue := createAppResourceModelWithUnknownComposeConfig(nil, "myapp", true, "RUNNING", float64(120))
+	configValue := newAppModelValue(appModelParams{
+		Name:          "myapp",
+		CustomApp:     true,
+		ComposeConfig: tftypes.UnknownValue,
+		DesiredState:  "RUNNING",
+		StateTimeout:  float64(120),
+	})
 
 	req := resource.ValidateConfigRequest{
 		Config: tfsdk.Config{
