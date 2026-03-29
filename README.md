@@ -22,6 +22,29 @@ terraform {
 }
 ```
 
+## Build And Install
+
+```bash
+make build
+make install
+```
+
+`make build` writes the provider binary to the repo root as `terraform-provider-truenas`.
+
+`make install` copies it to:
+
+`~/.terraform.d/plugins/registry.terraform.io/deevus/truenas/${VERSION}/${GOOS}_${GOARCH}/`
+
+## Terraform CLI Config
+
+For local provider development, copy [example.tfrc](example.tfrc) to `~/.terraformrc`.
+
+The included example already points at:
+
+`/Users/aurimas/Code/GitHub/yavasura/terraform-provider-truenas`
+
+With that `dev_overrides` entry in place, any Terraform project that requests `deevus/truenas` will use the binary built in this repo root after you run `make build`.
+
 ## Usage
 
 ```hcl

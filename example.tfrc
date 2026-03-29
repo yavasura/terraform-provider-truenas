@@ -1,0 +1,7 @@
+provider_installation {
+  dev_overrides {
+    "deevus/truenas" = "/Users/aurimas/Code/GitHub/yavasura/terraform-provider-truenas"
+  }
+
+  direct {}
+}

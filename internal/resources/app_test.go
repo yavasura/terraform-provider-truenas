@@ -2,17 +2,21 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/terraform-provider-truenas/internal/services"
 	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	truenas "github.com/deevus/truenas-go"
+	"github.com/deevus/truenas-go/client"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -111,7 +115,6 @@ func TestAppResource_Schema(t *testing.T) {
 	}
 }
 
-
 // getAppResourceSchema returns the schema for the app resource
 func getAppResourceSchema(t *testing.T) resource.SchemaResponse {
 	t.Helper()
@@ -125,14 +128,33 @@ func getAppResourceSchema(t *testing.T) resource.SchemaResponse {
 // appModelParams contains parameters for creating test app resource model values.
 // All fields are optional - nil values result in null tftypes values.
 type appModelParams struct {
-	ID              interface{}            // Resource ID (usually same as Name)
-	Name            interface{}            // App name
-	CustomApp       interface{}            // Whether this is a custom app (usually true)
-	ComposeConfig   interface{}            // Docker Compose YAML config
-	DesiredState    interface{}            // Desired state: "RUNNING", "STOPPED", "running", "stopped"
-	StateTimeout    interface{}            // Timeout in seconds (as float64)
-	State           interface{}            // Actual state from API
-	RestartTriggers map[string]interface{} // Map of trigger keys to values
+	ID                        interface{}            // Resource ID (usually same as Name)
+	Name                      interface{}            // App name
+	CustomApp                 interface{}            // Whether this is a custom app (usually true)
+	CatalogApp                interface{}            // Catalog app name
+	Train                     interface{}            // Catalog train
+	Version                   interface{}            // Desired version selector
+	Values                    interface{}            // Values object
+	CustomComposeConfig       interface{}            // Structured compose config
+	CustomComposeConfigString interface{}            // Compose config string
+	ComposeConfig             interface{}            // Deprecated compose config alias
+	DesiredState              interface{}            // Desired state: "RUNNING", "STOPPED", "running", "stopped"
+	StateTimeout              interface{}            // Timeout in seconds (as float64)
+	State                     interface{}            // Actual state from API
+	UpgradeAvailable          interface{}            // Whether upgrade is available
+	LatestVersion             interface{}            // Latest version from API
+	LatestAppVersion          interface{}            // Latest app version from API
+	ImageUpdatesAvailable     interface{}            // Whether image updates are available
+	Migrated                  interface{}            // Whether app was migrated
+	HumanVersion              interface{}            // Human version string
+	InstalledVersion          interface{}            // Installed version from API
+	Metadata                  interface{}            // Metadata object
+	ActiveWorkloads           interface{}            // Active workloads object
+	Notes                     interface{}            // Notes string
+	Portals                   interface{}            // Portals object
+	VersionDetails            interface{}            // Version details object
+	Config                    interface{}            // Current API config object
+	RestartTriggers           map[string]interface{} // Map of trigger keys to values
 }
 
 // newAppModelValue creates a tftypes.Value from appModelParams.
@@ -149,27 +171,151 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 		triggersValue = tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, triggerMap)
 	}
 
+	dynamicValue := func(v interface{}) tftypes.Value {
+		if v == nil {
+			return tftypes.NewValue(tftypes.DynamicPseudoType, nil)
+		}
+
+		switch val := v.(type) {
+		case map[string]interface{}:
+			return tftypes.NewValue(tftypes.DynamicPseudoType, toDynamicTFData(val))
+		case []interface{}:
+			return tftypes.NewValue(tftypes.DynamicPseudoType, toDynamicTFData(val))
+		default:
+			return tftypes.NewValue(tftypes.DynamicPseudoType, val)
+		}
+	}
+
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
-			"id":               tftypes.String,
-			"name":             tftypes.String,
-			"custom_app":       tftypes.Bool,
-			"compose_config":   tftypes.String,
-			"desired_state":    tftypes.String,
-			"state_timeout":    tftypes.Number,
-			"state":            tftypes.String,
-			"restart_triggers": tftypes.Map{ElementType: tftypes.String},
+			"id":                           tftypes.String,
+			"name":                         tftypes.String,
+			"custom_app":                   tftypes.Bool,
+			"catalog_app":                  tftypes.String,
+			"train":                        tftypes.String,
+			"version":                      tftypes.String,
+			"values":                       tftypes.DynamicPseudoType,
+			"custom_compose_config":        tftypes.DynamicPseudoType,
+			"custom_compose_config_string": tftypes.String,
+			"compose_config":               tftypes.String,
+			"desired_state":                tftypes.String,
+			"state_timeout":                tftypes.Number,
+			"state":                        tftypes.String,
+			"upgrade_available":            tftypes.Bool,
+			"latest_version":               tftypes.String,
+			"latest_app_version":           tftypes.String,
+			"image_updates_available":      tftypes.Bool,
+			"migrated":                     tftypes.Bool,
+			"human_version":                tftypes.String,
+			"installed_version":            tftypes.String,
+			"metadata":                     tftypes.DynamicPseudoType,
+			"active_workloads":             tftypes.DynamicPseudoType,
+			"notes":                        tftypes.String,
+			"portals":                      tftypes.DynamicPseudoType,
+			"version_details":              tftypes.DynamicPseudoType,
+			"config":                       tftypes.DynamicPseudoType,
+			"restart_triggers":             tftypes.Map{ElementType: tftypes.String},
 		},
 	}, map[string]tftypes.Value{
-		"id":               tftypes.NewValue(tftypes.String, p.ID),
-		"name":             tftypes.NewValue(tftypes.String, p.Name),
-		"custom_app":       tftypes.NewValue(tftypes.Bool, p.CustomApp),
-		"compose_config":   tftypes.NewValue(tftypes.String, p.ComposeConfig),
-		"desired_state":    tftypes.NewValue(tftypes.String, p.DesiredState),
-		"state_timeout":    tftypes.NewValue(tftypes.Number, p.StateTimeout),
-		"state":            tftypes.NewValue(tftypes.String, p.State),
-		"restart_triggers": triggersValue,
+		"id":                           tftypes.NewValue(tftypes.String, p.ID),
+		"name":                         tftypes.NewValue(tftypes.String, p.Name),
+		"custom_app":                   tftypes.NewValue(tftypes.Bool, p.CustomApp),
+		"catalog_app":                  tftypes.NewValue(tftypes.String, p.CatalogApp),
+		"train":                        tftypes.NewValue(tftypes.String, p.Train),
+		"version":                      tftypes.NewValue(tftypes.String, p.Version),
+		"values":                       dynamicValue(p.Values),
+		"custom_compose_config":        dynamicValue(p.CustomComposeConfig),
+		"custom_compose_config_string": tftypes.NewValue(tftypes.String, p.CustomComposeConfigString),
+		"compose_config":               tftypes.NewValue(tftypes.String, p.ComposeConfig),
+		"desired_state":                tftypes.NewValue(tftypes.String, p.DesiredState),
+		"state_timeout":                tftypes.NewValue(tftypes.Number, p.StateTimeout),
+		"state":                        tftypes.NewValue(tftypes.String, p.State),
+		"upgrade_available":            tftypes.NewValue(tftypes.Bool, p.UpgradeAvailable),
+		"latest_version":               tftypes.NewValue(tftypes.String, p.LatestVersion),
+		"latest_app_version":           tftypes.NewValue(tftypes.String, p.LatestAppVersion),
+		"image_updates_available":      tftypes.NewValue(tftypes.Bool, p.ImageUpdatesAvailable),
+		"migrated":                     tftypes.NewValue(tftypes.Bool, p.Migrated),
+		"human_version":                tftypes.NewValue(tftypes.String, p.HumanVersion),
+		"installed_version":            tftypes.NewValue(tftypes.String, p.InstalledVersion),
+		"metadata":                     dynamicValue(p.Metadata),
+		"active_workloads":             dynamicValue(p.ActiveWorkloads),
+		"notes":                        tftypes.NewValue(tftypes.String, p.Notes),
+		"portals":                      dynamicValue(p.Portals),
+		"version_details":              dynamicValue(p.VersionDetails),
+		"config":                       dynamicValue(p.Config),
+		"restart_triggers":             triggersValue,
 	})
+}
+
+func toDynamicTFData(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		attrs := make(map[string]tftypes.Value, len(val))
+		for k, item := range val {
+			child := toDynamicTFTValue(item)
+			attrs[k] = child
+		}
+		return attrs
+	case []interface{}:
+		values := make([]tftypes.Value, 0, len(val))
+		for _, item := range val {
+			child := toDynamicTFTValue(item)
+			values = append(values, child)
+		}
+		return values
+	case string:
+		return val
+	case bool:
+		return val
+	case int:
+		return int64(val)
+	case int64:
+		return val
+	case float64:
+		return val
+	default:
+		return ""
+	}
+}
+
+func toDynamicTFTValue(v interface{}) tftypes.Value {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		attrs := make(map[string]tftypes.Value, len(val))
+		attrTypes := make(map[string]tftypes.Type, len(val))
+		for k, item := range val {
+			child := toDynamicTFTValue(item)
+			attrs[k] = child
+			attrTypes[k] = child.Type()
+		}
+		return tftypes.NewValue(tftypes.Object{AttributeTypes: attrTypes}, attrs)
+	case []interface{}:
+		if len(val) == 0 {
+			return tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{})
+		}
+		values := make([]tftypes.Value, 0, len(val))
+		var elementType tftypes.Type = tftypes.String
+		for i, item := range val {
+			child := toDynamicTFTValue(item)
+			values = append(values, child)
+			if i == 0 {
+				elementType = child.Type()
+			}
+		}
+		return tftypes.NewValue(tftypes.List{ElementType: elementType}, values)
+	case string:
+		return tftypes.NewValue(tftypes.String, val)
+	case bool:
+		return tftypes.NewValue(tftypes.Bool, val)
+	case int:
+		return tftypes.NewValue(tftypes.Number, int64(val))
+	case int64:
+		return tftypes.NewValue(tftypes.Number, val)
+	case float64:
+		return tftypes.NewValue(tftypes.Number, val)
+	default:
+		return tftypes.NewValue(tftypes.String, "")
+	}
 }
 
 // createAppResourceModelValue creates a tftypes.Value for the app resource model.
@@ -267,9 +413,9 @@ func TestAppResource_Create_Success(t *testing.T) {
 
 	// Verify state was set
 	var model AppResourceModel
-	diags := resp.State.Get(context.Background(), &model)
-	if diags.HasError() {
-		t.Fatalf("failed to get state: %v", diags)
+	stateDiags := resp.State.Get(context.Background(), &model)
+	if stateDiags.HasError() {
+		t.Fatalf("failed to get state: %v", stateDiags)
 	}
 
 	if model.ID.ValueString() != "myapp" {
@@ -797,9 +943,9 @@ func TestAppResource_Read_EmptyComposeConfigSetsNull(t *testing.T) {
 	}
 
 	var model AppResourceModel
-	diags := resp.State.Get(context.Background(), &model)
-	if diags.HasError() {
-		t.Fatalf("failed to get state: %v", diags)
+	stateDiags := resp.State.Get(context.Background(), &model)
+	if stateDiags.HasError() {
+		t.Fatalf("failed to get state: %v", stateDiags)
 	}
 
 	// compose_config should be null when API returns empty config
@@ -2323,5 +2469,248 @@ func TestAppResource_Update_DesiredStateCasePreservation(t *testing.T) {
 	// State should reflect the actual API state
 	if model.State.ValueString() != "STOPPED" {
 		t.Errorf("expected state 'STOPPED', got %q", model.State.ValueString())
+	}
+}
+
+func TestAppResource_buildCreateParams_CatalogApp(t *testing.T) {
+	values := types.ObjectValueMust(
+		map[string]attr.Type{"replicas": types.Int64Type},
+		map[string]attr.Value{"replicas": types.Int64Value(2)},
+	)
+
+	r := &AppResource{}
+	model := &AppResourceModel{
+		Name:       types.StringValue("plex"),
+		CustomApp:  types.BoolValue(false),
+		CatalogApp: types.StringValue("plex"),
+		Train:      types.StringValue("stable"),
+		Version:    types.StringValue("1.2.3"),
+		Values:     types.DynamicValue(values),
+	}
+
+	params := r.buildCreateParams(context.Background(), model)
+
+	if params["app_name"] != "plex" {
+		t.Fatalf("expected app_name plex, got %#v", params["app_name"])
+	}
+	if params["catalog_app"] != "plex" {
+		t.Fatalf("expected catalog_app plex, got %#v", params["catalog_app"])
+	}
+	if params["train"] != "stable" {
+		t.Fatalf("expected train stable, got %#v", params["train"])
+	}
+	if params["version"] != "1.2.3" {
+		t.Fatalf("expected version 1.2.3, got %#v", params["version"])
+	}
+
+	valuesMap, ok := params["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected values map, got %T", params["values"])
+	}
+	if valuesMap["replicas"] != int64(2) {
+		t.Fatalf("expected replicas 2, got %#v", valuesMap["replicas"])
+	}
+}
+
+func TestAppResource_Read_RawClientCatalogAppMapsValues(t *testing.T) {
+	r := &AppResource{
+		BaseResource: BaseResource{
+			client: &client.MockClient{
+				CallFunc: func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+					if method != "app.query" {
+						t.Fatalf("unexpected method %q", method)
+					}
+
+					return json.RawMessage(`[
+						{
+							"id": "plex",
+							"name": "plex",
+							"state": "RUNNING",
+							"custom_app": false,
+							"version": "2.0.0",
+							"human_version": "2.0.0_1.0.0",
+							"upgrade_available": true,
+							"latest_version": "2.1.0",
+							"latest_app_version": "2.1.0",
+							"image_updates_available": false,
+							"migrated": false,
+							"metadata": {"icon": "plex.svg"},
+							"active_workloads": {"containers": 1},
+							"notes": "hello",
+							"portals": {"web": "http://plex.local"},
+							"version_details": {"healthy": true},
+							"config": {"resources": {"limits": {"cpu": 2}}}
+						}
+					]`), nil
+				},
+			},
+		},
+	}
+
+	schemaResp := getAppResourceSchema(t)
+	stateValue := newAppModelValue(appModelParams{
+		ID:         "plex",
+		Name:       "plex",
+		CustomApp:  false,
+		CatalogApp: "plex",
+		Train:      "stable",
+		Version:    "latest",
+		State:      "RUNNING",
+	})
+
+	req := resource.ReadRequest{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+			Raw:    stateValue,
+		},
+	}
+	resp := &resource.ReadResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Read(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var model AppResourceModel
+	diags := resp.State.Get(context.Background(), &model)
+	if diags.HasError() {
+		t.Fatalf("failed to get state: %v", diags)
+	}
+
+	if model.CustomApp.ValueBool() {
+		t.Fatal("expected catalog app")
+	}
+	if model.Values.IsNull() {
+		t.Fatal("expected values to be populated from API config")
+	}
+	if model.CustomComposeConfigString.IsNull() == false {
+		t.Fatal("expected custom compose config string to stay null for catalog app")
+	}
+	if model.InstalledVersion.ValueString() != "2.0.0" {
+		t.Fatalf("expected installed version 2.0.0, got %q", model.InstalledVersion.ValueString())
+	}
+	if !model.UpgradeAvailable.ValueBool() {
+		t.Fatal("expected upgrade_available to be true")
+	}
+}
+
+func TestAppResource_Read_RawClientCatalogAppPreservesPriorValues(t *testing.T) {
+	r := &AppResource{
+		BaseResource: BaseResource{
+			client: &client.MockClient{
+				CallFunc: func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+					return json.RawMessage(`[
+						{
+							"id": "minio",
+							"name": "minio",
+							"state": "RUNNING",
+							"custom_app": false,
+							"config": {
+								"minio": {"existingSecret": "redacted"},
+								"network": {"api_port": {"port_number": 9000}}
+							}
+						}
+					]`), nil
+				},
+			},
+		},
+	}
+
+	schemaResp := getAppResourceSchema(t)
+	plannedValues, diags := types.ObjectValue(
+		map[string]attr.Type{
+			"minio": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"rootUser": types.StringType,
+			}},
+			"network": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"api_port": types.ObjectType{AttrTypes: map[string]attr.Type{
+					"port_number": types.Int64Type,
+				}},
+			}},
+		},
+		map[string]attr.Value{
+			"minio": types.ObjectValueMust(
+				map[string]attr.Type{"rootUser": types.StringType},
+				map[string]attr.Value{"rootUser": types.StringValue("admin")},
+			),
+			"network": types.ObjectValueMust(
+				map[string]attr.Type{
+					"api_port": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"port_number": types.Int64Type,
+					}},
+				},
+				map[string]attr.Value{
+					"api_port": types.ObjectValueMust(
+						map[string]attr.Type{"port_number": types.Int64Type},
+						map[string]attr.Value{"port_number": types.Int64Value(9000)},
+					),
+				},
+			),
+		},
+	)
+	if diags.HasError() {
+		t.Fatalf("failed to build planned values: %v", diags)
+	}
+
+	priorState := tfsdk.State{Schema: schemaResp.Schema}
+	setDiags := priorState.Set(context.Background(), &AppResourceModel{
+		ID:              types.StringValue("minio"),
+		Name:            types.StringValue("minio"),
+		CustomApp:       types.BoolValue(false),
+		CatalogApp:      types.StringValue("minio"),
+		Train:           types.StringValue("stable"),
+		Version:         types.StringValue("latest"),
+		Values:          types.DynamicValue(plannedValues),
+		State:           types.StringValue("RUNNING"),
+		RestartTriggers: types.MapNull(types.StringType),
+	})
+	if setDiags.HasError() {
+		t.Fatalf("failed to build prior state: %v", setDiags)
+	}
+
+	req := resource.ReadRequest{
+		State: priorState,
+	}
+	resp := &resource.ReadResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Read(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	var model AppResourceModel
+	diags = resp.State.Get(context.Background(), &model)
+	if diags.HasError() {
+		t.Fatalf("failed to get state: %v", diags)
+	}
+
+	valuesObj, ok := model.Values.UnderlyingValue().(types.Object)
+	if !ok {
+		t.Fatalf("expected object underlying value, got %T", model.Values.UnderlyingValue())
+	}
+	minioVal, ok := valuesObj.Attributes()["minio"].(types.Object)
+	if !ok {
+		t.Fatalf("expected minio object, got %T", valuesObj.Attributes()["minio"])
+	}
+	rootUser, ok := minioVal.Attributes()["rootUser"].(types.String)
+	if !ok {
+		t.Fatalf("expected rootUser string, got %T", minioVal.Attributes()["rootUser"])
+	}
+	if rootUser.ValueString() != "admin" {
+		t.Fatalf("expected preserved rootUser admin, got %q", rootUser.ValueString())
+	}
+
+	if model.Config.IsNull() {
+		t.Fatal("expected API config to still be populated in computed config field")
 	}
 }

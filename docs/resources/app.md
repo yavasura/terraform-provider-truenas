@@ -2,12 +2,12 @@
 page_title: "truenas_app Resource - terraform-provider-truenas"
 subcategory: ""
 description: |-
-  Manages a TrueNAS application (custom Docker Compose app or catalog app).
+  Manages a TrueNAS application using the TrueNAS app.create/app.update API.
 ---
 
 # truenas_app (Resource)
 
-Manages a TrueNAS application (custom Docker Compose app or catalog app).
+Manages a TrueNAS application using the TrueNAS app.create/app.update API.
 
 ## Example Usage
 
@@ -19,7 +19,7 @@ resource "truenas_app" "nginx" {
   name       = "nginx"
   custom_app = true
 
-  compose_config = <<-EOT
+  custom_compose_config_string = <<-EOT
     services:
       nginx:
         image: nginx:latest
@@ -58,7 +58,7 @@ resource "truenas_app" "example" {
   name       = "my-app"
   custom_app = true
 
-  compose_config = <<-EOF
+  custom_compose_config_string = <<-EOF
     services:
       web:
         image: nginx:latest
@@ -75,6 +75,26 @@ resource "truenas_app" "example" {
 
 > **Note:** Adding or removing `restart_triggers` does not trigger a restart. Only changes to existing trigger values cause the app to restart.
 
+### Catalog App
+
+```terraform
+resource "truenas_app" "plex" {
+  name        = "plex"
+  custom_app  = false
+  catalog_app = "plex"
+  train       = "stable"
+  version     = "latest"
+
+  values = {
+    resources = {
+      limits = {
+        cpu = 2
+      }
+    }
+  }
+}
+```
+
 ## Import
 
 Apps can be imported using the app name:
@@ -88,17 +108,36 @@ terraform import truenas_app.example my-app
 
 ### Required
 
-- `custom_app` (Boolean) Whether this is a custom Docker Compose application.
-- `name` (String) Application name.
+- `custom_app` (Boolean) Whether this is a custom Docker Compose application (`true`) or a catalog application (`false`).
+- `name` (String) Application name. Maps to the API's `app_name` field.
 
 ### Optional
 
-- `compose_config` (String) Docker Compose YAML configuration string (required for custom apps).
+- `catalog_app` (String) Catalog application name. Required when `custom_app` is false.
+- `compose_config` (String, Deprecated) Deprecated alias for `custom_compose_config_string`.
+- `custom_compose_config` (Dynamic) Structured Docker Compose configuration object for custom applications.
+- `custom_compose_config_string` (String) Docker Compose YAML configuration string for custom applications.
 - `desired_state` (String) Desired application state: 'running' or 'stopped' (case-insensitive). Defaults to 'RUNNING'.
+- `train` (String) Catalog train to install from. Defaults to `stable`.
+- `values` (Dynamic) Application values object passed to the API.
+- `version` (String) Desired catalog version selector for create/replace operations. Defaults to `latest`.
 - `restart_triggers` (Map of String) Map of values that, when changed, trigger an app restart. Use this to restart the app when dependent resources change, e.g., `restart_triggers = { config_checksum = truenas_file.config.checksum }`.
 - `state_timeout` (Number) Timeout in seconds to wait for state transitions. Defaults to 120. Range: 30-600.
 
 ### Read-Only
 
+- `active_workloads` (Dynamic) Active workload details reported by the API.
+- `config` (Dynamic) Current application config returned by the API.
+- `human_version` (String) Human-readable installed version string.
 - `id` (String) Application identifier (the app name).
+- `image_updates_available` (Boolean) Whether newer container images are available.
+- `installed_version` (String) Installed application version reported by the API.
+- `latest_app_version` (String) Latest application version reported by the API, if any.
+- `latest_version` (String) Latest available version reported by the API, if any.
+- `metadata` (Dynamic) Application metadata reported by the API.
+- `migrated` (Boolean) Whether the app was migrated from Kubernetes.
+- `notes` (String) Application notes reported by the API.
+- `portals` (Dynamic) Application portals reported by the API.
 - `state` (String) Application state (RUNNING, STOPPED, etc.).
+- `upgrade_available` (Boolean) Whether an upgrade is available for the application.
+- `version_details` (Dynamic) Detailed version information reported by the API.
