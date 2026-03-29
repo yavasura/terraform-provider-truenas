@@ -271,6 +271,19 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 	})
 }
 
+func customAppModelValue(p appModelParams) tftypes.Value {
+	if p.CustomApp == nil {
+		p.CustomApp = true
+	}
+	if p.DesiredState == nil {
+		p.DesiredState = "RUNNING"
+	}
+	if p.StateTimeout == nil {
+		p.StateTimeout = float64(120)
+	}
+	return newAppModelValue(p)
+}
+
 func toDynamicTFData(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
@@ -342,50 +355,6 @@ func toDynamicTFTValue(v interface{}) tftypes.Value {
 	}
 }
 
-// createAppResourceModelValue creates a tftypes.Value for the app resource model.
-// Deprecated: Use newAppModelValue with appModelParams instead for better readability.
-func createAppResourceModelValue(
-	id, name interface{},
-	customApp interface{},
-	composeConfig interface{},
-	desiredState interface{},
-	stateTimeout interface{},
-	state interface{},
-) tftypes.Value {
-	return newAppModelValue(appModelParams{
-		ID:            id,
-		Name:          name,
-		CustomApp:     customApp,
-		ComposeConfig: composeConfig,
-		DesiredState:  desiredState,
-		StateTimeout:  stateTimeout,
-		State:         state,
-	})
-}
-
-// createAppResourceModelValueWithTriggers creates a tftypes.Value for the app resource model with restart_triggers.
-// Deprecated: Use newAppModelValue with appModelParams instead for better readability.
-func createAppResourceModelValueWithTriggers(
-	id, name interface{},
-	customApp interface{},
-	composeConfig interface{},
-	desiredState interface{},
-	stateTimeout interface{},
-	state interface{},
-	restartTriggers map[string]interface{},
-) tftypes.Value {
-	return newAppModelValue(appModelParams{
-		ID:              id,
-		Name:            name,
-		CustomApp:       customApp,
-		ComposeConfig:   composeConfig,
-		DesiredState:    desiredState,
-		StateTimeout:    stateTimeout,
-		State:           state,
-		RestartTriggers: restartTriggers,
-	})
-}
-
 func TestAppResource_Create_Success(t *testing.T) {
 	var capturedOpts truenas.CreateAppOpts
 
@@ -405,7 +374,12 @@ func TestAppResource_Create_Success(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	planValue := createAppResourceModelValue(nil, "myapp", true, nil, "RUNNING", float64(120), nil)
+	planValue := newAppModelValue(appModelParams{
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+	})
 
 	req := resource.CreateRequest{
 		Plan: tfsdk.Plan{
@@ -455,12 +429,9 @@ func TestAppResource_ValidateConfig_AllowsUnknownCustomComposeConfig(t *testing.
 	r := NewAppResource().(*AppResource)
 	schemaResp := getAppResourceSchema(t)
 
-	configValue := newAppModelValue(appModelParams{
+	configValue := customAppModelValue(appModelParams{
 		Name:          "myapp",
-		CustomApp:     true,
 		ComposeConfig: tftypes.UnknownValue,
-		DesiredState:  "RUNNING",
-		StateTimeout:  float64(120),
 	})
 
 	req := resource.ValidateConfigRequest{
@@ -498,7 +469,10 @@ func TestAppResource_Create_WithComposeConfig(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	composeYAML := "version: '3'\nservices:\n  web:\n    image: nginx"
-	planValue := createAppResourceModelValue(nil, "myapp", true, composeYAML, "RUNNING", float64(120), nil)
+	planValue := customAppModelValue(appModelParams{
+		Name:          "myapp",
+		ComposeConfig: composeYAML,
+	})
 
 	req := resource.CreateRequest{
 		Plan: tfsdk.Plan{
@@ -538,7 +512,9 @@ func TestAppResource_Create_APIError(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	planValue := createAppResourceModelValue(nil, "myapp", true, nil, "RUNNING", float64(120), nil)
+	planValue := customAppModelValue(appModelParams{
+		Name: "myapp",
+	})
 
 	req := resource.CreateRequest{
 		Plan: tfsdk.Plan{
@@ -584,7 +560,11 @@ func TestAppResource_Read_Success(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -647,7 +627,11 @@ func TestAppResource_Read_NotFound(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "RUNNING",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -688,7 +672,11 @@ func TestAppResource_Read_APIError(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "RUNNING",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -740,11 +728,19 @@ func TestAppResource_Update_Success(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
 
 	// Plan with new compose config
 	composeYAML := "version: '3'\nservices:\n  web:\n    image: nginx:latest"
-	planValue := createAppResourceModelValue("myapp", "myapp", true, composeYAML, "RUNNING", float64(120), nil)
+	planValue := customAppModelValue(appModelParams{
+		ID:            "myapp",
+		Name:          "myapp",
+		ComposeConfig: composeYAML,
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -985,8 +981,16 @@ func TestAppResource_Update_APIError(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, "new: config", "RUNNING", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:            "myapp",
+		Name:          "myapp",
+		ComposeConfig: "new: config",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -1028,7 +1032,11 @@ func TestAppResource_Delete_Success(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "RUNNING",
+	})
 
 	req := resource.DeleteRequest{
 		State: tfsdk.State{
@@ -1068,7 +1076,11 @@ func TestAppResource_Delete_APIError(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING")
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "RUNNING",
+	})
 
 	req := resource.DeleteRequest{
 		State: tfsdk.State{
@@ -1096,7 +1108,7 @@ func TestAppResource_ImportState(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Create an initial empty state with the correct schema
-	emptyState := createAppResourceModelValue(nil, nil, nil, nil, nil, nil, nil)
+	emptyState := newAppModelValue(appModelParams{})
 
 	req := resource.ImportStateRequest{
 		ID: "imported-app",
@@ -1159,7 +1171,12 @@ func TestAppResource_Read_EmptyComposeConfigSetsNull(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, "old config", "RUNNING", float64(120), "STOPPED")
+	stateValue := customAppModelValue(appModelParams{
+		ID:            "myapp",
+		Name:          "myapp",
+		ComposeConfig: "old config",
+		State:         "STOPPED",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -1214,8 +1231,16 @@ func TestAppResource_Update_QueryErrorAfterUpdate(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, "new: config", "RUNNING", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:            "myapp",
+		Name:          "myapp",
+		ComposeConfig: "new: config",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -1258,8 +1283,16 @@ func TestAppResource_Update_AppNotFoundAfterUpdate(t *testing.T) {
 
 	schemaResp := getAppResourceSchema(t)
 
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, "new: config", "RUNNING", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:            "myapp",
+		Name:          "myapp",
+		ComposeConfig: "new: config",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -1388,7 +1421,7 @@ func TestAppResource_ImportState_FollowedByRead(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Step 1: Import state
-	emptyState := createAppResourceModelValue(nil, nil, nil, nil, nil, nil, nil)
+	emptyState := newAppModelValue(appModelParams{})
 
 	importReq := resource.ImportStateRequest{
 		ID: "imported-app",
@@ -1578,8 +1611,15 @@ func TestAppResource_Update_ReconcileStateFromStoppedToRunning(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: STOPPED, desired: RUNNING
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "STOPPED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "STOPPED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:   "myapp",
+		Name: "myapp",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -1642,7 +1682,13 @@ func TestAppResource_Read_PreservesDesiredState(t *testing.T) {
 
 	// Prior state has desired_state = "STOPPED" (user intentionally wants it stopped)
 	// but API returns state = "RUNNING" (maybe it was started externally)
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "STOPPED", float64(180), "STOPPED")
+	stateValue := customAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		DesiredState: "STOPPED",
+		StateTimeout: float64(180),
+		State:        "STOPPED",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -1766,7 +1812,10 @@ func TestAppResource_Read_DefaultsDesiredStateWhenNull(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Prior state has null desired_state (like after import)
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, nil, nil, nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:   "myapp",
+		Name: "myapp",
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -1834,7 +1883,10 @@ func TestAppResource_Create_WithDesiredStateStopped(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Plan with desired_state = "stopped"
-	planValue := createAppResourceModelValue(nil, "myapp", true, nil, "stopped", float64(120), nil)
+	planValue := customAppModelValue(appModelParams{
+		Name:         "myapp",
+		DesiredState: "stopped",
+	})
 
 	req := resource.CreateRequest{
 		Plan: tfsdk.Plan{
@@ -2004,8 +2056,15 @@ func TestAppResource_Update_CrashedAppStartAttempt(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: CRASHED, desired: RUNNING
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), "CRASHED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, nil, "RUNNING", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:    "myapp",
+		Name:  "myapp",
+		State: "CRASHED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:   "myapp",
+		Name: "myapp",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2060,8 +2119,17 @@ func TestAppResource_Update_CrashedAppDesiredStopped(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: CRASHED, desired: STOPPED - no action needed
-	stateValue := createAppResourceModelValue("myapp", "myapp", true, nil, "STOPPED", float64(120), "CRASHED")
-	planValue := createAppResourceModelValue("myapp", "myapp", true, nil, "STOPPED", float64(120), nil)
+	stateValue := customAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		DesiredState: "STOPPED",
+		State:        "CRASHED",
+	})
+	planValue := customAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		DesiredState: "STOPPED",
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2135,16 +2203,29 @@ func TestAppResource_Update_RestartTriggersChange(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		map[string]interface{}{"config_checksum": "old_checksum"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "old_checksum",
+		},
+	})
 
 	// Plan: has restart_triggers with new checksum (file changed)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		map[string]interface{}{"config_checksum": "new_checksum"},
-	)
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "new_checksum",
+		},
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2203,14 +2284,23 @@ func TestAppResource_Update_RestartTriggersNoChangeNoRestart(t *testing.T) {
 
 	// Both state and plan have same restart_triggers - no restart needed
 	triggers := map[string]interface{}{"config_checksum": "same_checksum"}
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		triggers,
-	)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		triggers,
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:              "myapp",
+		Name:            "myapp",
+		CustomApp:       true,
+		DesiredState:    "RUNNING",
+		StateTimeout:    float64(120),
+		State:           "RUNNING",
+		RestartTriggers: triggers,
+	})
+	planValue := newAppModelValue(appModelParams{
+		ID:              "myapp",
+		Name:            "myapp",
+		CustomApp:       true,
+		DesiredState:    "RUNNING",
+		StateTimeout:    float64(120),
+		RestartTriggers: triggers,
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2265,14 +2355,27 @@ func TestAppResource_Update_RestartTriggersStoppedAppNoRestart(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Triggers changed, but app is STOPPED - no restart needed
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "STOPPED", float64(120), "STOPPED",
-		map[string]interface{}{"config_checksum": "old_checksum"},
-	)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "STOPPED", float64(120), nil,
-		map[string]interface{}{"config_checksum": "new_checksum"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "STOPPED",
+		StateTimeout: float64(120),
+		State:        "STOPPED",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "old_checksum",
+		},
+	})
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "STOPPED",
+		StateTimeout: float64(120),
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "new_checksum",
+		},
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2322,10 +2425,17 @@ func TestAppResource_Read_PreservesRestartTriggers(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Prior state has restart_triggers set
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		map[string]interface{}{"config_checksum": "abc123"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "abc123",
+		},
+	})
 
 	req := resource.ReadRequest{
 		State: tfsdk.State{
@@ -2392,16 +2502,26 @@ func TestAppResource_Update_RestartTriggersAddedFirstTime(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: no restart_triggers (null)
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		nil, // null triggers
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+	})
 
 	// Plan: has restart_triggers (first time adding them)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		map[string]interface{}{"config_checksum": "abc123"},
-	)
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "abc123",
+		},
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2456,16 +2576,26 @@ func TestAppResource_Update_RestartTriggersRemoved(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		map[string]interface{}{"config_checksum": "abc123"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "abc123",
+		},
+	})
 
 	// Plan: no restart_triggers (removed)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		nil, // null triggers
-	)
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2513,16 +2643,29 @@ func TestAppResource_Update_RestartTriggersStopError(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		map[string]interface{}{"config_checksum": "old_checksum"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "old_checksum",
+		},
+	})
 
 	// Plan: has restart_triggers with new checksum (trigger change)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		map[string]interface{}{"config_checksum": "new_checksum"},
-	)
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "new_checksum",
+		},
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2580,16 +2723,29 @@ func TestAppResource_Update_RestartTriggersStartError(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), "RUNNING",
-		map[string]interface{}{"config_checksum": "old_checksum"},
-	)
+	stateValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		State:        "RUNNING",
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "old_checksum",
+		},
+	})
 
 	// Plan: has restart_triggers with new checksum (trigger change)
-	planValue := createAppResourceModelValueWithTriggers(
-		"myapp", "myapp", true, nil, "RUNNING", float64(120), nil,
-		map[string]interface{}{"config_checksum": "new_checksum"},
-	)
+	planValue := newAppModelValue(appModelParams{
+		ID:           "myapp",
+		Name:         "myapp",
+		CustomApp:    true,
+		DesiredState: "RUNNING",
+		StateTimeout: float64(120),
+		RestartTriggers: map[string]interface{}{
+			"config_checksum": "new_checksum",
+		},
+	})
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
