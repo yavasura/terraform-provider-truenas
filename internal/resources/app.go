@@ -249,6 +249,9 @@ func (r *AppResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 	hasComposeObject := !data.CustomComposeConfig.IsNull() && !data.CustomComposeConfig.IsUnknown()
 	hasComposeString := (!data.CustomComposeConfigString.IsNull() && !data.CustomComposeConfigString.IsUnknown() && data.CustomComposeConfigString.ValueString() != "") ||
 		(!data.ComposeConfig.IsNull() && !data.ComposeConfig.IsUnknown() && data.ComposeConfig.ValueString() != "")
+	hasUnknownCompose := data.CustomComposeConfig.IsUnknown() ||
+		data.CustomComposeConfigString.IsUnknown() ||
+		data.ComposeConfig.IsUnknown()
 
 	if hasComposeObject && hasComposeString {
 		resp.Diagnostics.AddAttributeError(
@@ -266,7 +269,7 @@ func (r *AppResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 				"catalog_app must not be set when custom_app is true.",
 			)
 		}
-		if !hasComposeObject && !hasComposeString {
+		if !hasComposeObject && !hasComposeString && !hasUnknownCompose {
 			resp.Diagnostics.AddError(
 				"Missing Custom App Configuration",
 				"Custom apps require one of custom_compose_config, custom_compose_config_string, or compose_config.",
@@ -462,6 +465,16 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	appName := data.Name.ValueString()
+	plannedDesiredState := data.DesiredState
+	plannedStateTimeout := data.StateTimeout
+	plannedRestartTriggers := data.RestartTriggers
+	plannedCatalogApp := data.CatalogApp
+	plannedTrain := data.Train
+	plannedVersion := data.Version
+	plannedValues := data.Values
+	plannedCustomComposeConfig := data.CustomComposeConfig
+	plannedCustomComposeConfigString := data.CustomComposeConfigString
+	plannedComposeConfig := data.ComposeConfig
 
 	// Handle compose_config changes first (if any)
 	composeConfigChanged := !data.Values.Equal(stateData.Values) ||
@@ -581,12 +594,51 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 
 	// Map final state to model
-	data.ID = types.StringValue(appName)
+	app, err := r.readAppEntry(ctx, appName)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Read App After Update",
+			fmt.Sprintf("Unable to read app %q after update: %s", appName, err.Error()),
+		)
+		return
+	}
+	if app == nil {
+		data.ID = types.StringValue(appName)
+		data.State = types.StringValue(currentState)
+
+		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+		return
+	}
+
+	r.syncAppStateToModel(&data, app, true)
+	data.DesiredState = reqPlanDesiredStateOrDefault(plannedDesiredState)
+	data.StateTimeout = reqPlanStateTimeoutOrDefault(plannedStateTimeout)
+	data.RestartTriggers = plannedRestartTriggers
+	data.CatalogApp = plannedCatalogApp
+	data.Train = plannedTrain
+	data.Version = plannedVersion
+	data.Values = plannedValues
+	data.CustomComposeConfig = plannedCustomComposeConfig
+	data.CustomComposeConfigString = plannedCustomComposeConfigString
+	data.ComposeConfig = plannedComposeConfig
 	data.State = types.StringValue(currentState)
-	// DesiredState is preserved from plan - don't overwrite user's value
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func reqPlanDesiredStateOrDefault(value customtypes.CaseInsensitiveStringValue) customtypes.CaseInsensitiveStringValue {
+	if value.IsNull() || value.IsUnknown() || value.ValueString() == "" {
+		return customtypes.NewCaseInsensitiveStringValue(AppStateRunning)
+	}
+	return value
+}
+
+func reqPlanStateTimeoutOrDefault(value types.Int64) types.Int64 {
+	if value.IsNull() || value.IsUnknown() || value.ValueInt64() == 0 {
+		return types.Int64Value(120)
+	}
+	return value
 }
 
 func (r *AppResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
