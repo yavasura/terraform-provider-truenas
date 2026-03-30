@@ -284,6 +284,16 @@ func customAppModelValue(p appModelParams) tftypes.Value {
 	return newAppModelValue(p)
 }
 
+func customAppTriggersModelValue(name, desiredState, state string, restartTriggers map[string]interface{}) tftypes.Value {
+	return customAppModelValue(appModelParams{
+		ID:              name,
+		Name:            name,
+		DesiredState:    desiredState,
+		State:           state,
+		RestartTriggers: restartTriggers,
+	})
+}
+
 func toDynamicTFData(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
@@ -2203,28 +2213,13 @@ func TestAppResource_Update_RestartTriggersChange(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "old_checksum",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", map[string]interface{}{
+		"config_checksum": "old_checksum",
 	})
 
 	// Plan: has restart_triggers with new checksum (file changed)
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "new_checksum",
-		},
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", map[string]interface{}{
+		"config_checksum": "new_checksum",
 	})
 
 	req := resource.UpdateRequest{
@@ -2284,23 +2279,8 @@ func TestAppResource_Update_RestartTriggersNoChangeNoRestart(t *testing.T) {
 
 	// Both state and plan have same restart_triggers - no restart needed
 	triggers := map[string]interface{}{"config_checksum": "same_checksum"}
-	stateValue := newAppModelValue(appModelParams{
-		ID:              "myapp",
-		Name:            "myapp",
-		CustomApp:       true,
-		DesiredState:    "RUNNING",
-		StateTimeout:    float64(120),
-		State:           "RUNNING",
-		RestartTriggers: triggers,
-	})
-	planValue := newAppModelValue(appModelParams{
-		ID:              "myapp",
-		Name:            "myapp",
-		CustomApp:       true,
-		DesiredState:    "RUNNING",
-		StateTimeout:    float64(120),
-		RestartTriggers: triggers,
-	})
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", triggers)
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", triggers)
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2355,26 +2335,11 @@ func TestAppResource_Update_RestartTriggersStoppedAppNoRestart(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Triggers changed, but app is STOPPED - no restart needed
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "STOPPED",
-		StateTimeout: float64(120),
-		State:        "STOPPED",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "old_checksum",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "STOPPED", "STOPPED", map[string]interface{}{
+		"config_checksum": "old_checksum",
 	})
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "STOPPED",
-		StateTimeout: float64(120),
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "new_checksum",
-		},
+	planValue := customAppTriggersModelValue("myapp", "STOPPED", "", map[string]interface{}{
+		"config_checksum": "new_checksum",
 	})
 
 	req := resource.UpdateRequest{
@@ -2425,16 +2390,8 @@ func TestAppResource_Read_PreservesRestartTriggers(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Prior state has restart_triggers set
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "abc123",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", map[string]interface{}{
+		"config_checksum": "abc123",
 	})
 
 	req := resource.ReadRequest{
@@ -2502,25 +2459,11 @@ func TestAppResource_Update_RestartTriggersAddedFirstTime(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: no restart_triggers (null)
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-	})
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", nil)
 
 	// Plan: has restart_triggers (first time adding them)
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "abc123",
-		},
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", map[string]interface{}{
+		"config_checksum": "abc123",
 	})
 
 	req := resource.UpdateRequest{
@@ -2576,26 +2519,12 @@ func TestAppResource_Update_RestartTriggersRemoved(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "abc123",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", map[string]interface{}{
+		"config_checksum": "abc123",
 	})
 
 	// Plan: no restart_triggers (removed)
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-	})
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", nil)
 
 	req := resource.UpdateRequest{
 		State: tfsdk.State{
@@ -2643,28 +2572,13 @@ func TestAppResource_Update_RestartTriggersStopError(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "old_checksum",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", map[string]interface{}{
+		"config_checksum": "old_checksum",
 	})
 
 	// Plan: has restart_triggers with new checksum (trigger change)
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "new_checksum",
-		},
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", map[string]interface{}{
+		"config_checksum": "new_checksum",
 	})
 
 	req := resource.UpdateRequest{
@@ -2723,28 +2637,13 @@ func TestAppResource_Update_RestartTriggersStartError(t *testing.T) {
 	schemaResp := getAppResourceSchema(t)
 
 	// Current state: has restart_triggers with old checksum
-	stateValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		State:        "RUNNING",
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "old_checksum",
-		},
+	stateValue := customAppTriggersModelValue("myapp", "RUNNING", "RUNNING", map[string]interface{}{
+		"config_checksum": "old_checksum",
 	})
 
 	// Plan: has restart_triggers with new checksum (trigger change)
-	planValue := newAppModelValue(appModelParams{
-		ID:           "myapp",
-		Name:         "myapp",
-		CustomApp:    true,
-		DesiredState: "RUNNING",
-		StateTimeout: float64(120),
-		RestartTriggers: map[string]interface{}{
-			"config_checksum": "new_checksum",
-		},
+	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", map[string]interface{}{
+		"config_checksum": "new_checksum",
 	})
 
 	req := resource.UpdateRequest{
