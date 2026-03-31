@@ -128,7 +128,7 @@ func (r *AppResource) buildCreateParams(ctx context.Context, data *AppResourceMo
 		"custom_app": data.CustomApp.ValueBool(),
 	}
 
-	if value := dynamicValueToAny(ctx, data.Values); value != nil {
+	if value := mergedAppValues(ctx, data.Values, data.WriteOnlyValues); value != nil {
 		params["values"] = value
 	}
 	if value := dynamicValueToAny(ctx, data.CustomComposeConfig); value != nil {
@@ -153,7 +153,7 @@ func (r *AppResource) buildCreateParams(ctx context.Context, data *AppResourceMo
 func (r *AppResource) buildUpdateParams(ctx context.Context, data *AppResourceModel) map[string]any {
 	params := map[string]any{}
 
-	if value := dynamicValueToAny(ctx, data.Values); value != nil {
+	if value := mergedAppValues(ctx, data.Values, data.WriteOnlyValues); value != nil {
 		params["values"] = value
 	}
 	if value := dynamicValueToAny(ctx, data.CustomComposeConfig); value != nil {
@@ -205,6 +205,41 @@ func dynamicValueToAny(ctx context.Context, value types.Dynamic) any {
 	}
 
 	return attrValueToAny(ctx, value.UnderlyingValue())
+}
+
+func mergedAppValues(ctx context.Context, values types.Dynamic, writeOnlyValues types.Dynamic) any {
+	base := dynamicValueToAny(ctx, values)
+	override := dynamicValueToAny(ctx, writeOnlyValues)
+	return deepMergeAny(base, override)
+}
+
+func deepMergeAny(base any, override any) any {
+	if base == nil {
+		return override
+	}
+	if override == nil {
+		return base
+	}
+
+	baseMap, baseIsMap := base.(map[string]any)
+	overrideMap, overrideIsMap := override.(map[string]any)
+	if !baseIsMap || !overrideIsMap {
+		return override
+	}
+
+	merged := make(map[string]any, len(baseMap)+len(overrideMap))
+	for key, value := range baseMap {
+		merged[key] = value
+	}
+	for key, value := range overrideMap {
+		if existing, ok := merged[key]; ok {
+			merged[key] = deepMergeAny(existing, value)
+		} else {
+			merged[key] = value
+		}
+	}
+
+	return merged
 }
 
 func attrValueToAny(ctx context.Context, value attr.Value) any {

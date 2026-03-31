@@ -2,13 +2,16 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"time"
 
 	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -29,9 +32,10 @@ var _ resource.ResourceWithValidateConfig = &AppResource{}
 var appNameRegexp = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
 const (
-	defaultAppTrain        = "stable"
-	defaultAppVersion      = "latest"
-	defaultAppStateTimeout = 120 * time.Second
+	defaultAppTrain                 = "stable"
+	defaultAppVersion               = "latest"
+	defaultAppStateTimeout          = 120 * time.Second
+	appWriteOnlyMaskPrivateStateKey = "app_write_only_values_mask"
 )
 
 // AppResource defines the resource implementation.
@@ -48,6 +52,7 @@ type AppResourceModel struct {
 	Train                     types.String                           `tfsdk:"train"`
 	Version                   types.String                           `tfsdk:"version"`
 	Values                    types.Dynamic                          `tfsdk:"values"`
+	WriteOnlyValues           types.Dynamic                          `tfsdk:"write_only_values"`
 	CustomComposeConfig       types.Dynamic                          `tfsdk:"custom_compose_config"`
 	CustomComposeConfigString customtypes.YAMLStringValue            `tfsdk:"custom_compose_config_string"`
 	ComposeConfig             customtypes.YAMLStringValue            `tfsdk:"compose_config"`
@@ -78,6 +83,7 @@ type appUserStateSnapshot struct {
 	Train                     types.String
 	Version                   types.String
 	Values                    types.Dynamic
+	WriteOnlyValues           types.Dynamic
 	CustomComposeConfig       types.Dynamic
 	CustomComposeConfigString customtypes.YAMLStringValue
 	ComposeConfig             customtypes.YAMLStringValue
@@ -145,8 +151,13 @@ func (r *AppResource) Schema(ctx context.Context, req resource.SchemaRequest, re
 				},
 			},
 			"values": schema.DynamicAttribute{
-				Description: "Application values object passed to the API.",
+				Description: "Application values object passed to the API and stored in Terraform state.",
 				Optional:    true,
+			},
+			"write_only_values": schema.DynamicAttribute{
+				Description: "Application values object passed to the API for create and update operations, but omitted from Terraform state. Intended for secrets.",
+				Optional:    true,
+				WriteOnly:   true,
 			},
 			"custom_compose_config": schema.DynamicAttribute{
 				Description: "Structured Docker Compose configuration object for custom applications.",
@@ -315,12 +326,29 @@ func (r *AppResource) ValidateConfig(ctx context.Context, req resource.ValidateC
 
 func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data AppResourceModel
+	var configData AppResourceModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !configData.WriteOnlyValues.IsNull() && !configData.WriteOnlyValues.IsUnknown() {
+		data.WriteOnlyValues = configData.WriteOnlyValues
+	}
+
+	resp.Diagnostics.Append(storeAppWriteOnlyMask(ctx, resp.Private, data.WriteOnlyValues)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	currentWriteOnlyMask := dynamicValueToAny(ctx, data.WriteOnlyValues)
 
 	appName := data.Name.ValueString()
 	plannedValues := data.Values
@@ -336,6 +364,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// Map response to model
+	app.Config = redactAppConfig(app.Config, currentWriteOnlyMask)
 	r.syncAppStateToModel(&data, app, true)
 	data.Values = plannedValues
 
@@ -398,6 +427,12 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 	prior := snapshotAppUserState(data)
 
+	writeOnlyMask, diags := loadAppWriteOnlyMask(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Use the name to query the app
 	appName := data.Name.ValueString()
 
@@ -417,6 +452,7 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
+	app.Config = redactAppConfig(app.Config, writeOnlyMask)
 	r.syncAppStateToModel(&data, app, false)
 	prior.restoreRead(&data, app.State)
 
@@ -426,12 +462,37 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var data AppResourceModel
+	var configData AppResourceModel
 	var stateData AppResourceModel
+	var diags diag.Diagnostics
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !configData.WriteOnlyValues.IsNull() && !configData.WriteOnlyValues.IsUnknown() {
+		data.WriteOnlyValues = configData.WriteOnlyValues
+	}
+
+	resp.Diagnostics.Append(storeAppWriteOnlyMask(ctx, resp.Private, data.WriteOnlyValues)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	currentWriteOnlyMask := dynamicValueToAny(ctx, data.WriteOnlyValues)
+	if currentWriteOnlyMask == nil {
+		currentWriteOnlyMask, diags = loadAppWriteOnlyMask(ctx, req.Private)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 	}
 
 	// Read current state data to detect compose_config changes
@@ -444,7 +505,9 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	planned := snapshotAppUserState(data)
 
 	// Handle compose_config changes first (if any)
-	composeConfigChanged := !data.Values.Equal(stateData.Values) ||
+	writeOnlyValuesConfigured := !data.WriteOnlyValues.IsNull() && !data.WriteOnlyValues.IsUnknown()
+	composeConfigChanged := writeOnlyValuesConfigured ||
+		!data.Values.Equal(stateData.Values) ||
 		!data.CustomComposeConfig.Equal(stateData.CustomComposeConfig) ||
 		!data.CustomComposeConfigString.Equal(stateData.CustomComposeConfigString) ||
 		!data.ComposeConfig.Equal(stateData.ComposeConfig)
@@ -565,12 +628,145 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	app.Config = redactAppConfig(app.Config, currentWriteOnlyMask)
 	r.syncAppStateToModel(&data, app, true)
 	planned.restoreUpdate(&data)
 	data.State = types.StringValue(currentState)
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func storeAppWriteOnlyMask(ctx context.Context, privateState interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, writeOnlyValues types.Dynamic) diag.Diagnostics {
+	if privateState == nil || (reflect.ValueOf(privateState).Kind() == reflect.Ptr && reflect.ValueOf(privateState).IsNil()) {
+		return nil
+	}
+
+	mask := dynamicValueToAny(ctx, writeOnlyValues)
+	if mask == nil {
+		return privateState.SetKey(ctx, appWriteOnlyMaskPrivateStateKey, nil)
+	}
+
+	maskJSON, err := json.Marshal(mask)
+	if err != nil {
+		var diags diag.Diagnostics
+		diags.AddError(
+			"Unable to Encode Write-Only App Values Mask",
+			fmt.Sprintf("Unable to encode write-only values mask: %s", err),
+		)
+		return diags
+	}
+
+	return privateState.SetKey(ctx, appWriteOnlyMaskPrivateStateKey, maskJSON)
+}
+
+func loadAppWriteOnlyMask(ctx context.Context, privateState interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) (any, diag.Diagnostics) {
+	if privateState == nil || (reflect.ValueOf(privateState).Kind() == reflect.Ptr && reflect.ValueOf(privateState).IsNil()) {
+		return nil, nil
+	}
+
+	maskJSON, diags := privateState.GetKey(ctx, appWriteOnlyMaskPrivateStateKey)
+	if diags.HasError() || len(maskJSON) == 0 {
+		return nil, diags
+	}
+
+	var mask any
+	if err := json.Unmarshal(maskJSON, &mask); err != nil {
+		diags.AddError(
+			"Unable to Decode Write-Only App Values Mask",
+			fmt.Sprintf("Unable to decode write-only values mask: %s", err),
+		)
+		return nil, diags
+	}
+
+	return mask, diags
+}
+
+func redactAppConfig(config any, mask any) any {
+	redacted, remove := redactAppConfigValue(config, mask)
+	if remove {
+		return nil
+	}
+	return redacted
+}
+
+func redactAppConfigValue(config any, mask any) (any, bool) {
+	if mask == nil {
+		return config, false
+	}
+
+	switch typedMask := mask.(type) {
+	case map[string]any:
+		configMap, ok := config.(map[string]any)
+		if !ok {
+			return config, false
+		}
+
+		redacted := make(map[string]any, len(configMap))
+		for key, value := range configMap {
+			redacted[key] = value
+		}
+
+		for key, maskValue := range typedMask {
+			configValue, ok := redacted[key]
+			if !ok {
+				continue
+			}
+
+			nested, remove := redactAppConfigValue(configValue, maskValue)
+			if remove {
+				delete(redacted, key)
+				continue
+			}
+			redacted[key] = nested
+		}
+
+		return redacted, false
+	case []any:
+		configList, ok := config.([]any)
+		if !ok {
+			return config, false
+		}
+
+		redacted := make([]any, len(configList))
+		copy(redacted, configList)
+
+		if len(typedMask) == 0 {
+			return redacted, false
+		}
+
+		if len(typedMask) == 1 {
+			for i, configValue := range redacted {
+				nested, remove := redactAppConfigValue(configValue, typedMask[0])
+				if remove {
+					redacted[i] = nil
+					continue
+				}
+				redacted[i] = nested
+			}
+			return redacted, false
+		}
+
+		for i, configValue := range redacted {
+			if i >= len(typedMask) {
+				break
+			}
+			nested, remove := redactAppConfigValue(configValue, typedMask[i])
+			if remove {
+				redacted[i] = nil
+				continue
+			}
+			redacted[i] = nested
+		}
+
+		return redacted, false
+	default:
+		return nil, true
+	}
 }
 
 func defaultDesiredStateValue(value customtypes.CaseInsensitiveStringValue, fallback string) customtypes.CaseInsensitiveStringValue {
@@ -605,6 +801,7 @@ func snapshotAppUserState(data AppResourceModel) appUserStateSnapshot {
 		Train:                     data.Train,
 		Version:                   data.Version,
 		Values:                    data.Values,
+		WriteOnlyValues:           data.WriteOnlyValues,
 		CustomComposeConfig:       data.CustomComposeConfig,
 		CustomComposeConfigString: data.CustomComposeConfigString,
 		ComposeConfig:             data.ComposeConfig,
@@ -639,6 +836,7 @@ func (s appUserStateSnapshot) restoreUpdate(data *AppResourceModel) {
 	data.Train = s.Train
 	data.Version = s.Version
 	data.Values = s.Values
+	data.WriteOnlyValues = types.DynamicNull()
 	data.CustomComposeConfig = s.CustomComposeConfig
 	data.CustomComposeConfigString = s.CustomComposeConfigString
 	data.ComposeConfig = s.ComposeConfig
@@ -734,6 +932,7 @@ func (r *AppResource) syncAppStateToModel(data *AppResourceModel, app *appEntryR
 
 	if app.CustomApp {
 		data.Values = types.DynamicNull()
+		data.WriteOnlyValues = types.DynamicNull()
 		data.CustomComposeConfig = anyToDynamicValue(app.Config)
 		if app.Config != nil {
 			yamlBytes, err := yaml.Marshal(app.Config)
@@ -747,6 +946,7 @@ func (r *AppResource) syncAppStateToModel(data *AppResourceModel, app *appEntryR
 		}
 	} else {
 		data.Values = anyToDynamicValue(app.Config)
+		data.WriteOnlyValues = types.DynamicNull()
 		data.CustomComposeConfig = types.DynamicNull()
 		data.CustomComposeConfigString = customtypes.NewYAMLStringNull()
 		data.ComposeConfig = customtypes.NewYAMLStringNull()

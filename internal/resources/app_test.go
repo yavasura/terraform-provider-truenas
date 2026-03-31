@@ -13,6 +13,7 @@ import (
 	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/truenas-go/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -125,6 +126,29 @@ func getAppResourceSchema(t *testing.T) resource.SchemaResponse {
 	return *schemaResp
 }
 
+type mockPrivateState struct {
+	data map[string][]byte
+}
+
+func (m *mockPrivateState) GetKey(_ context.Context, key string) ([]byte, diag.Diagnostics) {
+	if m == nil || m.data == nil {
+		return nil, nil
+	}
+	return m.data[key], nil
+}
+
+func (m *mockPrivateState) SetKey(_ context.Context, key string, value []byte) diag.Diagnostics {
+	if m.data == nil {
+		m.data = make(map[string][]byte)
+	}
+	if len(value) == 0 {
+		delete(m.data, key)
+		return nil
+	}
+	m.data[key] = value
+	return nil
+}
+
 // appModelParams contains parameters for creating test app resource model values.
 // All fields are optional - nil values result in null tftypes values.
 type appModelParams struct {
@@ -135,6 +159,7 @@ type appModelParams struct {
 	Train                     interface{}            // Catalog train
 	Version                   interface{}            // Desired version selector
 	Values                    interface{}            // Values object
+	WriteOnlyValues           interface{}            // Write-only values object
 	CustomComposeConfig       interface{}            // Structured compose config
 	CustomComposeConfigString interface{}            // Compose config string
 	ComposeConfig             interface{}            // Deprecated compose config alias
@@ -219,6 +244,7 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 			"train":                        tftypes.String,
 			"version":                      tftypes.String,
 			"values":                       tftypes.DynamicPseudoType,
+			"write_only_values":            tftypes.DynamicPseudoType,
 			"custom_compose_config":        tftypes.DynamicPseudoType,
 			"custom_compose_config_string": tftypes.String,
 			"compose_config":               tftypes.String,
@@ -248,6 +274,7 @@ func newAppModelValue(p appModelParams) tftypes.Value {
 		"train":                        stringValue(p.Train),
 		"version":                      stringValue(p.Version),
 		"values":                       dynamicValue(p.Values),
+		"write_only_values":            dynamicValue(p.WriteOnlyValues),
 		"custom_compose_config":        dynamicValue(p.CustomComposeConfig),
 		"custom_compose_config_string": stringValue(p.CustomComposeConfigString),
 		"compose_config":               stringValue(p.ComposeConfig),
@@ -2808,6 +2835,13 @@ func TestAppResource_buildCreateParams_CatalogApp(t *testing.T) {
 func TestAppResource_Read_RawClientCatalogAppMapsValues(t *testing.T) {
 	r := &AppResource{
 		BaseResource: BaseResource{
+			services: &services.TrueNASServices{
+				App: &truenas.MockAppService{
+					GetAppFunc: func(ctx context.Context, name string) (*truenas.App, error) {
+						return &truenas.App{Name: "minio", State: "RUNNING"}, nil
+					},
+				},
+			},
 			client: &client.MockClient{
 				CallFunc: func(ctx context.Context, method string, params any) (json.RawMessage, error) {
 					if method != "app.query" {
@@ -3005,5 +3039,262 @@ func TestAppResource_Read_RawClientCatalogAppPreservesPriorValues(t *testing.T) 
 
 	if model.Config.IsNull() {
 		t.Fatal("expected API config to still be populated in computed config field")
+	}
+}
+
+func TestAppResource_Update_RawClientCatalogAppMergesWriteOnlyValuesFromConfig(t *testing.T) {
+	var capturedMethod string
+	var capturedParams []any
+
+	r := &AppResource{
+		BaseResource: BaseResource{
+			services: &services.TrueNASServices{
+				App: &truenas.MockAppService{
+					GetAppFunc: func(ctx context.Context, name string) (*truenas.App, error) {
+						return &truenas.App{Name: "minio", State: "RUNNING"}, nil
+					},
+				},
+			},
+			client: &client.MockClient{
+				CallAndWaitFunc: func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+					capturedMethod = method
+					var ok bool
+					capturedParams, ok = params.([]any)
+					if !ok {
+						t.Fatalf("expected positional params, got %T", params)
+					}
+					return json.RawMessage(`null`), nil
+				},
+				CallFunc: func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+					if method != "app.query" {
+						t.Fatalf("unexpected method %q", method)
+					}
+
+					return json.RawMessage(`[
+						{
+							"id": "minio",
+							"name": "minio",
+							"state": "RUNNING",
+							"custom_app": false,
+							"config": {
+								"minio": {
+									"root_user": "",
+									"root_password": ""
+								},
+								"network": {
+									"api_port": {
+										"port_number": 9000
+									}
+								}
+							}
+						}
+					]`), nil
+				},
+			},
+		},
+	}
+
+	schemaResp := getAppResourceSchema(t)
+	valuesObject := types.ObjectValueMust(
+		map[string]attr.Type{
+			"network": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"api_port": types.ObjectType{AttrTypes: map[string]attr.Type{
+					"port_number": types.Int64Type,
+				}},
+			}},
+		},
+		map[string]attr.Value{
+			"network": types.ObjectValueMust(
+				map[string]attr.Type{
+					"api_port": types.ObjectType{AttrTypes: map[string]attr.Type{
+						"port_number": types.Int64Type,
+					}},
+				},
+				map[string]attr.Value{
+					"api_port": types.ObjectValueMust(
+						map[string]attr.Type{"port_number": types.Int64Type},
+						map[string]attr.Value{"port_number": types.Int64Value(9000)},
+					),
+				},
+			),
+		},
+	)
+	writeOnlyObject := types.ObjectValueMust(
+		map[string]attr.Type{
+			"minio": types.ObjectType{AttrTypes: map[string]attr.Type{
+				"root_user":     types.StringType,
+				"root_password": types.StringType,
+			}},
+		},
+		map[string]attr.Value{
+			"minio": types.ObjectValueMust(
+				map[string]attr.Type{
+					"root_user":     types.StringType,
+					"root_password": types.StringType,
+				},
+				map[string]attr.Value{
+					"root_user":     types.StringValue("admin"),
+					"root_password": types.StringValue("rotated-secret"),
+				},
+			),
+		},
+	)
+
+	configState := tfsdk.State{Schema: schemaResp.Schema}
+	configDiags := configState.Set(context.Background(), &AppResourceModel{
+		ID:              types.StringValue("minio"),
+		Name:            types.StringValue("minio"),
+		CustomApp:       types.BoolValue(false),
+		CatalogApp:      types.StringValue("minio"),
+		Train:           types.StringValue("stable"),
+		Version:         types.StringValue("latest"),
+		Values:          types.DynamicValue(valuesObject),
+		WriteOnlyValues: types.DynamicValue(writeOnlyObject),
+		DesiredState:    customtypes.NewCaseInsensitiveStringValue("RUNNING"),
+		StateTimeout:    types.Int64Value(120),
+		RestartTriggers: types.MapNull(types.StringType),
+	})
+	if configDiags.HasError() {
+		t.Fatalf("failed to build config state: %v", configDiags)
+	}
+
+	stateState := tfsdk.State{Schema: schemaResp.Schema}
+	stateDiags := stateState.Set(context.Background(), &AppResourceModel{
+		ID:              types.StringValue("minio"),
+		Name:            types.StringValue("minio"),
+		CustomApp:       types.BoolValue(false),
+		CatalogApp:      types.StringValue("minio"),
+		Train:           types.StringValue("stable"),
+		Version:         types.StringValue("latest"),
+		Values:          types.DynamicValue(valuesObject),
+		DesiredState:    customtypes.NewCaseInsensitiveStringValue("RUNNING"),
+		State:           types.StringValue("RUNNING"),
+		StateTimeout:    types.Int64Value(120),
+		RestartTriggers: types.MapNull(types.StringType),
+	})
+	if stateDiags.HasError() {
+		t.Fatalf("failed to build state: %v", stateDiags)
+	}
+
+	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: configState.Raw},
+		State:  stateState,
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    stateState.Raw,
+		},
+	}
+	resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schemaResp.Schema}}
+
+	r.Update(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+	if capturedMethod != "app.update" {
+		t.Fatalf("expected app.update, got %q", capturedMethod)
+	}
+	if len(capturedParams) != 2 {
+		t.Fatalf("expected 2 positional params, got %d", len(capturedParams))
+	}
+	if capturedParams[0] != "minio" {
+		t.Fatalf("expected app name minio, got %#v", capturedParams[0])
+	}
+
+	payload, ok := capturedParams[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected update payload map, got %T", capturedParams[1])
+	}
+	values, ok := payload["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected values map, got %T", payload["values"])
+	}
+	minioValues, ok := values["minio"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected minio values map, got %T", values["minio"])
+	}
+	if minioValues["root_user"] != "admin" {
+		t.Fatalf("expected root_user to be forwarded, got %#v", minioValues["root_user"])
+	}
+	if minioValues["root_password"] != "rotated-secret" {
+		t.Fatalf("expected root_password to be forwarded, got %#v", minioValues["root_password"])
+	}
+}
+
+func TestRedactAppConfig_RemovesWriteOnlyKeys(t *testing.T) {
+	config := map[string]any{
+		"minio": map[string]any{
+			"additional_envs": []any{
+				map[string]any{"name": "MINIO_TERRAFORM_ROTATION_ID", "value": "3"},
+			},
+			"extra_args":    []any{},
+			"root_password": "super-secret",
+			"root_user":     "minioadmin",
+		},
+		"network": map[string]any{
+			"api_port": map[string]any{"port_number": int64(9000)},
+		},
+	}
+	mask := map[string]any{
+		"minio": map[string]any{
+			"root_password": "ignored",
+			"root_user":     "ignored",
+		},
+	}
+
+	redacted, ok := redactAppConfig(config, mask).(map[string]any)
+	if !ok {
+		t.Fatalf("expected redacted config map, got %T", redactAppConfig(config, mask))
+	}
+
+	minioConfig, ok := redacted["minio"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected minio config map, got %T", redacted["minio"])
+	}
+	if _, exists := minioConfig["root_password"]; exists {
+		t.Fatal("expected root_password to be redacted")
+	}
+	if _, exists := minioConfig["root_user"]; exists {
+		t.Fatal("expected root_user to be redacted")
+	}
+	if _, exists := minioConfig["additional_envs"]; !exists {
+		t.Fatal("expected non-secret minio fields to remain")
+	}
+	if _, exists := redacted["network"]; !exists {
+		t.Fatal("expected unrelated config to remain")
+	}
+}
+
+func TestAppWriteOnlyMask_RoundTrip(t *testing.T) {
+	privateState := &mockPrivateState{}
+	writeOnlyValues := anyToDynamicValue(map[string]any{
+		"minio": map[string]any{
+			"root_password": "secret",
+			"root_user":     "admin",
+		},
+	})
+
+	if diags := storeAppWriteOnlyMask(context.Background(), privateState, writeOnlyValues); diags.HasError() {
+		t.Fatalf("unexpected store diagnostics: %v", diags)
+	}
+
+	mask, diags := loadAppWriteOnlyMask(context.Background(), privateState)
+	if diags.HasError() {
+		t.Fatalf("unexpected load diagnostics: %v", diags)
+	}
+
+	maskMap, ok := mask.(map[string]any)
+	if !ok {
+		t.Fatalf("expected mask map, got %T", mask)
+	}
+	minioMask, ok := maskMap["minio"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected minio mask map, got %T", maskMap["minio"])
+	}
+	if _, exists := minioMask["root_password"]; !exists {
+		t.Fatal("expected root_password path in loaded mask")
+	}
+	if _, exists := minioMask["root_user"]; !exists {
+		t.Fatal("expected root_user path in loaded mask")
 	}
 }
