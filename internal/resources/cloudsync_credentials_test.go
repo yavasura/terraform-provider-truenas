@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	truenas "github.com/deevus/truenas-go"
@@ -69,7 +70,7 @@ func TestCloudSyncCredentialsResource_Schema(t *testing.T) {
 	}
 
 	// Verify provider blocks exist
-	for _, block := range []string{"s3", "b2", "gcs", "azure"} {
+	for _, block := range []string{"s3", "b2", "gcs", "azure", "webdav"} {
 		_, ok := resp.Schema.Blocks[block]
 		if !ok {
 			t.Errorf("expected '%s' block in schema", block)
@@ -90,12 +91,13 @@ func getCloudSyncCredentialsResourceSchema(t *testing.T) resource.SchemaResponse
 
 // cloudSyncCredentialsModelParams holds parameters for creating test model values.
 type cloudSyncCredentialsModelParams struct {
-	ID    interface{}
-	Name  interface{}
-	S3    *s3BlockParams
-	B2    *b2BlockParams
-	GCS   *gcsBlockParams
-	Azure *azureBlockParams
+	ID     interface{}
+	Name   interface{}
+	S3     *s3BlockParams
+	B2     *b2BlockParams
+	GCS    *gcsBlockParams
+	Azure  *azureBlockParams
+	WebDAV *webdavBlockParams
 }
 
 type s3BlockParams struct {
@@ -117,6 +119,13 @@ type gcsBlockParams struct {
 type azureBlockParams struct {
 	Account interface{}
 	Key     interface{}
+}
+
+type webdavBlockParams struct {
+	URL    interface{}
+	Vendor interface{}
+	User   interface{}
+	Pass   interface{}
 }
 
 func createCloudSyncCredentialsModelValue(p cloudSyncCredentialsModelParams) tftypes.Value {
@@ -195,6 +204,30 @@ func createCloudSyncCredentialsModelValue(p cloudSyncCredentialsModelParams) tft
 		})
 	}
 
+	webdavValue := tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"url":    tftypes.String,
+			"vendor": tftypes.String,
+			"user":   tftypes.String,
+			"pass":   tftypes.String,
+		},
+	}, nil)
+	if p.WebDAV != nil {
+		webdavValue = tftypes.NewValue(tftypes.Object{
+			AttributeTypes: map[string]tftypes.Type{
+				"url":    tftypes.String,
+				"vendor": tftypes.String,
+				"user":   tftypes.String,
+				"pass":   tftypes.String,
+			},
+		}, map[string]tftypes.Value{
+			"url":    tftypes.NewValue(tftypes.String, p.WebDAV.URL),
+			"vendor": tftypes.NewValue(tftypes.String, p.WebDAV.Vendor),
+			"user":   tftypes.NewValue(tftypes.String, p.WebDAV.User),
+			"pass":   tftypes.NewValue(tftypes.String, p.WebDAV.Pass),
+		})
+	}
+
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
 			"id":   tftypes.String,
@@ -224,14 +257,23 @@ func createCloudSyncCredentialsModelValue(p cloudSyncCredentialsModelParams) tft
 					"key":     tftypes.String,
 				},
 			},
+			"webdav": tftypes.Object{
+				AttributeTypes: map[string]tftypes.Type{
+					"url":    tftypes.String,
+					"vendor": tftypes.String,
+					"user":   tftypes.String,
+					"pass":   tftypes.String,
+				},
+			},
 		},
 	}, map[string]tftypes.Value{
-		"id":    tftypes.NewValue(tftypes.String, p.ID),
-		"name":  tftypes.NewValue(tftypes.String, p.Name),
-		"s3":    s3Value,
-		"b2":    b2Value,
-		"gcs":   gcsValue,
-		"azure": azureValue,
+		"id":     tftypes.NewValue(tftypes.String, p.ID),
+		"name":   tftypes.NewValue(tftypes.String, p.Name),
+		"s3":     s3Value,
+		"b2":     b2Value,
+		"gcs":    gcsValue,
+		"azure":  azureValue,
+		"webdav": webdavValue,
 	})
 }
 
@@ -690,6 +732,57 @@ func TestCloudSyncCredentialsResource_Create_S3_MissingRequiredFields(t *testing
 	}
 }
 
+func TestCloudSyncCredentialsResource_Create_WebDAV_MissingRequiredFields(t *testing.T) {
+	r := &CloudSyncCredentialsResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{}},
+	}
+
+	schemaResp := getCloudSyncCredentialsResourceSchema(t)
+	// Create S3 block with missing required fields (access_key_id and secret_access_key are nil)
+	planValue := createCloudSyncCredentialsModelValue(cloudSyncCredentialsModelParams{
+		Name:   "Test WebDAV Missing Fields",
+		WebDAV: &webdavBlockParams{
+			// url, vendor, user and pass are nil - should fail validation
+		},
+	})
+
+	req := resource.CreateRequest{
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planValue,
+		},
+	}
+
+	resp := &resource.CreateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Create(context.Background(), req, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("expected error when WebDAV block is missing required fields")
+	}
+
+	// Verify the error messages mention the missing fields
+	for _, err := range resp.Diagnostics.Errors() {
+		errStr := err.Detail()
+		if errStr != "webdav.url is required when webdav block is specified" &&
+			errStr != "webdav.vendor is required when webdav block is specified" &&
+			errStr != "webdav.user is required when webdav block is specified" &&
+			errStr != "webdav.pass is required when webdav block is specified" {
+			t.Errorf("expected error about missing webdav required field, got: %s", errStr)
+		}
+	}
+
+	// The previous check would also succeed if just one error message was mentioned, so verify that each missing fields resulted in an error
+	if resp.Diagnostics.ErrorsCount() != 4 {
+		t.Errorf("expected 4 error messages for url, vendor, user and pass, got: %s", strconv.Itoa(resp.Diagnostics.ErrorsCount()))
+	}
+
+}
+
 func TestCloudSyncCredentialsResource_Read_APIError(t *testing.T) {
 	r := &CloudSyncCredentialsResource{
 		BaseResource: BaseResource{services: &services.TrueNASServices{
@@ -976,6 +1069,88 @@ func TestCloudSyncCredentialsResource_Create_Azure_Success(t *testing.T) {
 	resp.State.Get(context.Background(), &resultData)
 	if resultData.ID.ValueString() != "8" {
 		t.Errorf("expected ID '8', got %q", resultData.ID.ValueString())
+	}
+}
+
+func TestCloudSyncCredentialsResource_Create_WebDAV_Success(t *testing.T) {
+	var capturedOpts truenas.CreateCredentialOpts
+
+	r := &CloudSyncCredentialsResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{
+			CloudSync: &truenas.MockCloudSyncService{
+				CreateCredentialFunc: func(ctx context.Context, opts truenas.CreateCredentialOpts) (*truenas.CloudSyncCredential, error) {
+					capturedOpts = opts
+					return &truenas.CloudSyncCredential{
+						ID:           9,
+						Name:         "WebDAV",
+						ProviderType: "WEBDAV",
+						Attributes: map[string]string{
+							"url":    `https://webdav.example.com`,
+							"vendor": `OTHER`,
+							"user":   `someuser`,
+							"pass":   `somepass`,
+						},
+					}, nil
+				},
+			},
+		}},
+	}
+
+	schemaResp := getCloudSyncCredentialsResourceSchema(t)
+	planValue := createCloudSyncCredentialsModelValue(cloudSyncCredentialsModelParams{
+		Name: "WebDAV",
+		WebDAV: &webdavBlockParams{
+			URL:    `https://webdav.example.com`,
+			Vendor: `OTHER`,
+			User:   `someuser`,
+			Pass:   `somepass`,
+		},
+	})
+
+	req := resource.CreateRequest{
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planValue,
+		},
+	}
+
+	resp := &resource.CreateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Create(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	// Verify opts sent to service
+	if capturedOpts.Name != "WebDAV" {
+		t.Errorf("expected name 'WebDAV', got %q", capturedOpts.Name)
+	}
+	if capturedOpts.ProviderType != "WEBDAV" {
+		t.Errorf("expected provider type 'WEBDAV', got %q", capturedOpts.ProviderType)
+	}
+	if capturedOpts.Attributes["url"] != `https://webdav.example.com` {
+		t.Errorf("expected url 'https://webdav.example.com', got %v", capturedOpts.Attributes["url"])
+	}
+	if capturedOpts.Attributes["vendor"] != `OTHER` {
+		t.Errorf("expected vendor 'OTHER', got %v", capturedOpts.Attributes["vendor"])
+	}
+	if capturedOpts.Attributes["user"] != `someuser` {
+		t.Errorf("expected user 'someuser', got %v", capturedOpts.Attributes["user"])
+	}
+	if capturedOpts.Attributes["pass"] != `somepass` {
+		t.Errorf("expected pass 'somepass', got %v", capturedOpts.Attributes["pass"])
+	}
+
+	// Verify state was set correctly
+	var resultData CloudSyncCredentialsResourceModel
+	resp.State.Get(context.Background(), &resultData)
+	if resultData.ID.ValueString() != "9" {
+		t.Errorf("expected ID '9', got %q", resultData.ID.ValueString())
 	}
 }
 
