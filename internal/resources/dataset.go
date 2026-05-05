@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	truenas "github.com/deevus/truenas-go"
 	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	truenas "github.com/deevus/truenas-go"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -24,24 +24,26 @@ type DatasetResource struct {
 	BaseResource
 }
 
+type sizeStringSemanticEqualsPlanModifier struct{}
+
 // DatasetResourceModel describes the resource data model.
 type DatasetResourceModel struct {
-	ID           types.String                   `tfsdk:"id"`
-	Pool         types.String                   `tfsdk:"pool"`
-	Path         types.String                   `tfsdk:"path"`
-	Parent       types.String                   `tfsdk:"parent"`
-	Name         types.String                   `tfsdk:"name"`
-	MountPath    types.String                   `tfsdk:"mount_path"`
-	FullPath     types.String                   `tfsdk:"full_path"`
-	Compression  types.String                   `tfsdk:"compression"`
-	Quota        customtypes.SizeStringValue    `tfsdk:"quota"`
-	RefQuota     customtypes.SizeStringValue    `tfsdk:"refquota"`
-	Atime        types.String                   `tfsdk:"atime"`
-	Mode         types.String                   `tfsdk:"mode"`
-	UID          types.Int64                    `tfsdk:"uid"`
-	GID          types.Int64                    `tfsdk:"gid"`
-	ForceDestroy types.Bool                     `tfsdk:"force_destroy"`
-	SnapshotID   types.String                   `tfsdk:"snapshot_id"`
+	ID           types.String                `tfsdk:"id"`
+	Pool         types.String                `tfsdk:"pool"`
+	Path         types.String                `tfsdk:"path"`
+	Parent       types.String                `tfsdk:"parent"`
+	Name         types.String                `tfsdk:"name"`
+	MountPath    types.String                `tfsdk:"mount_path"`
+	FullPath     types.String                `tfsdk:"full_path"`
+	Compression  types.String                `tfsdk:"compression"`
+	Quota        customtypes.SizeStringValue `tfsdk:"quota"`
+	RefQuota     customtypes.SizeStringValue `tfsdk:"refquota"`
+	Atime        types.String                `tfsdk:"atime"`
+	Mode         types.String                `tfsdk:"mode"`
+	UID          types.Int64                 `tfsdk:"uid"`
+	GID          types.Int64                 `tfsdk:"gid"`
+	ForceDestroy types.Bool                  `tfsdk:"force_destroy"`
+	SnapshotID   types.String                `tfsdk:"snapshot_id"`
 }
 
 // mapDatasetToModel maps API response fields to the Terraform model.
@@ -59,6 +61,41 @@ func mapDatasetToModel(ds *truenas.Dataset, data *DatasetResourceModel) {
 // NewDatasetResource creates a new DatasetResource.
 func NewDatasetResource() resource.Resource {
 	return &DatasetResource{}
+}
+
+func (m sizeStringSemanticEqualsPlanModifier) Description(ctx context.Context) string {
+	return "Preserves the prior state value when size strings are semantically equal."
+}
+
+func (m sizeStringSemanticEqualsPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return "Preserves the prior state value when size strings are semantically equal."
+}
+
+func (m sizeStringSemanticEqualsPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
+		return
+	}
+
+	if req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+		return
+	}
+
+	stateValue := customtypes.NewSizeStringValue(req.StateValue.ValueString())
+	planValue := customtypes.NewSizeStringValue(req.PlanValue.ValueString())
+
+	equal, diags := planValue.StringSemanticEquals(ctx, stateValue)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if equal {
+		resp.PlanValue = req.StateValue
+	}
+}
+
+func sizeStringSemanticEqualsModifier() planmodifier.String {
+	return sizeStringSemanticEqualsPlanModifier{}
 }
 
 func (r *DatasetResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -140,6 +177,7 @@ func (r *DatasetResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					sizeStringSemanticEqualsModifier(),
 				},
 			},
 			"refquota": schema.StringAttribute{
@@ -150,6 +188,7 @@ func (r *DatasetResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					sizeStringSemanticEqualsModifier(),
 				},
 			},
 			"atime": schema.StringAttribute{
@@ -426,7 +465,13 @@ func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		hasChanges = true
 	}
 
-	if !data.Quota.Equal(state.Quota) && !data.Quota.IsNull() {
+	quotaEqual, diags := data.Quota.StringSemanticEquals(ctx, state.Quota)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !quotaEqual && !data.Quota.IsNull() && !data.Quota.IsUnknown() {
 		quotaBytes, err := truenas.ParseSize(data.Quota.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
@@ -439,7 +484,13 @@ func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		hasChanges = true
 	}
 
-	if !data.RefQuota.Equal(state.RefQuota) && !data.RefQuota.IsNull() {
+	refQuotaEqual, diags := data.RefQuota.StringSemanticEquals(ctx, state.RefQuota)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !refQuotaEqual && !data.RefQuota.IsNull() && !data.RefQuota.IsUnknown() {
 		refquotaBytes, err := truenas.ParseSize(data.RefQuota.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
@@ -122,4 +123,19 @@ func TestSizeStringType_String(t *testing.T) {
 	if st.String() != "SizeStringType" {
 		t.Errorf("expected 'SizeStringType', got %q", st.String())
 	}
+}
+
+func TestSizeStringType_ImplementsInterface(t *testing.T) {
+	t.Parallel()
+
+	var _ attr.Type = SizeStringType{}
+	var _ basetypes.StringTypable = SizeStringType{}
+}
+
+func TestSizeStringValue_ImplementsInterface(t *testing.T) {
+	t.Parallel()
+
+	var _ attr.Value = SizeStringValue{}
+	var _ basetypes.StringValuable = SizeStringValue{}
+	var _ basetypes.StringValuableWithSemanticEquals = SizeStringValue{}
 }

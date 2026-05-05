@@ -5,9 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/terraform-provider-truenas/internal/services"
+	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	truenas "github.com/deevus/truenas-go"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -1565,6 +1568,275 @@ func TestDatasetResource_Update_RefQuotaChange(t *testing.T) {
 	// refquota is sent as int64 bytes (SI units: 1G = 1000^3)
 	if *capturedOpts.RefQuota != int64(5000000000) {
 		t.Errorf("expected refquota 5000000000 (5G in bytes), got %v", *capturedOpts.RefQuota)
+	}
+}
+
+func TestDatasetResource_Update_QuotaSemanticNoOp(t *testing.T) {
+	apiCalled := false
+
+	r := &DatasetResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{
+			Dataset: &truenas.MockDatasetService{
+				UpdateDatasetFunc: func(ctx context.Context, id string, opts truenas.UpdateDatasetOpts) (*truenas.Dataset, error) {
+					apiCalled = true
+					return nil, nil
+				},
+			},
+		}},
+	}
+
+	schemaResp := getDatasetResourceSchema(t)
+
+	stateValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", "4398046511104", nil, nil, nil)
+	planValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", "4TiB", nil, nil, nil)
+
+	req := resource.UpdateRequest{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+			Raw:    stateValue,
+		},
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planValue,
+		},
+	}
+
+	resp := &resource.UpdateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Update(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	if apiCalled {
+		t.Error("expected API not to be called when quota values are semantically equal")
+	}
+}
+
+func TestDatasetResource_SizeAttributesUseSemanticEquality(t *testing.T) {
+	t.Parallel()
+
+	schemaResp := getDatasetResourceSchema(t)
+
+	testCases := []struct {
+		name      string
+		attrName  string
+		stateVal  string
+		configVal string
+	}{
+		{
+			name:      "quota bytes and binary units",
+			attrName:  "quota",
+			stateVal:  "4398046511104",
+			configVal: "4TiB",
+		},
+		{
+			name:      "refquota bytes and binary units",
+			attrName:  "refquota",
+			stateVal:  "549755813888",
+			configVal: "512GiB",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			attrDef, ok := schemaResp.Schema.Attributes[tc.attrName]
+			if !ok {
+				t.Fatalf("expected %q attribute in schema", tc.attrName)
+			}
+
+			stringAttr, ok := attrDef.(schema.StringAttribute)
+			if !ok {
+				t.Fatalf("expected %q to be a string attribute, got %T", tc.attrName, attrDef)
+			}
+
+			sizeType, ok := stringAttr.CustomType.(customtypes.SizeStringType)
+			if !ok {
+				t.Fatalf("expected %q to use SizeStringType, got %T", tc.attrName, stringAttr.CustomType)
+			}
+
+			priorValuable, diags := sizeType.ValueFromString(context.Background(), types.StringValue(tc.stateVal))
+			if diags.HasError() {
+				t.Fatalf("unexpected diagnostics converting prior value: %v", diags)
+			}
+
+			proposedValuable, diags := sizeType.ValueFromString(context.Background(), types.StringValue(tc.configVal))
+			if diags.HasError() {
+				t.Fatalf("unexpected diagnostics converting proposed value: %v", diags)
+			}
+
+			proposedSizeValue, ok := proposedValuable.(customtypes.SizeStringValue)
+			if !ok {
+				t.Fatalf("expected proposed value to be SizeStringValue, got %T", proposedValuable)
+			}
+
+			equal, diags := proposedSizeValue.StringSemanticEquals(context.Background(), priorValuable)
+			if diags.HasError() {
+				t.Fatalf("unexpected diagnostics comparing semantic equality: %v", diags)
+			}
+
+			if !equal {
+				t.Fatalf("expected %q and %q to be semantically equal for %s", tc.stateVal, tc.configVal, tc.attrName)
+			}
+		})
+	}
+}
+
+func TestSizeStringSemanticEqualsModifier_PreservesStateForEquivalentSizes(t *testing.T) {
+	t.Parallel()
+
+	modifier := sizeStringSemanticEqualsModifier()
+	req := planmodifier.StringRequest{
+		StateValue:  types.StringValue("4398046511104"),
+		ConfigValue: types.StringValue("4TiB"),
+		PlanValue:   types.StringValue("4TiB"),
+	}
+	resp := &planmodifier.StringResponse{
+		PlanValue: types.StringValue("4TiB"),
+	}
+
+	modifier.PlanModifyString(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	if resp.PlanValue.ValueString() != "4398046511104" {
+		t.Fatalf("expected plan value to preserve prior state bytes, got %q", resp.PlanValue.ValueString())
+	}
+}
+
+func TestSizeStringSemanticEqualsModifier_KeepsRealDifferences(t *testing.T) {
+	t.Parallel()
+
+	modifier := sizeStringSemanticEqualsModifier()
+	req := planmodifier.StringRequest{
+		StateValue:  types.StringValue("4398046511104"),
+		ConfigValue: types.StringValue("5TiB"),
+		PlanValue:   types.StringValue("5TiB"),
+	}
+	resp := &planmodifier.StringResponse{
+		PlanValue: types.StringValue("5TiB"),
+	}
+
+	modifier.PlanModifyString(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+	}
+
+	if resp.PlanValue.ValueString() != "5TiB" {
+		t.Fatalf("expected real size difference to remain planned, got %q", resp.PlanValue.ValueString())
+	}
+}
+
+func TestDatasetResource_Update_RefQuotaSemanticNoOp(t *testing.T) {
+	apiCalled := false
+
+	r := &DatasetResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{
+			Dataset: &truenas.MockDatasetService{
+				UpdateDatasetFunc: func(ctx context.Context, id string, opts truenas.UpdateDatasetOpts) (*truenas.Dataset, error) {
+					apiCalled = true
+					return nil, nil
+				},
+			},
+		}},
+	}
+
+	schemaResp := getDatasetResourceSchema(t)
+
+	stateValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", nil, "549755813888", nil, nil)
+	planValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", nil, "512GiB", nil, nil)
+
+	req := resource.UpdateRequest{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+			Raw:    stateValue,
+		},
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planValue,
+		},
+	}
+
+	resp := &resource.UpdateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Update(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	if apiCalled {
+		t.Error("expected API not to be called when refquota values are semantically equal")
+	}
+}
+
+func TestDatasetResource_Update_QuotaSemanticDifferenceTriggersUpdate(t *testing.T) {
+	var capturedOpts truenas.UpdateDatasetOpts
+
+	r := &DatasetResource{
+		BaseResource: BaseResource{services: &services.TrueNASServices{
+			Dataset: &truenas.MockDatasetService{
+				UpdateDatasetFunc: func(ctx context.Context, id string, opts truenas.UpdateDatasetOpts) (*truenas.Dataset, error) {
+					capturedOpts = opts
+					return &truenas.Dataset{
+						ID:          "storage/apps",
+						Name:        "storage/apps",
+						Mountpoint:  "/mnt/storage/apps",
+						Compression: "lz4",
+						Quota:       5497558138880,
+						Atime:       "on",
+					}, nil
+				},
+			},
+		}},
+	}
+
+	schemaResp := getDatasetResourceSchema(t)
+
+	stateValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", "4398046511104", nil, nil, nil)
+	planValue := createDatasetResourceModel("storage/apps", "storage", "apps", nil, nil, "/mnt/storage/apps", "lz4", "5TiB", nil, nil, nil)
+
+	req := resource.UpdateRequest{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+			Raw:    stateValue,
+		},
+		Plan: tfsdk.Plan{
+			Schema: schemaResp.Schema,
+			Raw:    planValue,
+		},
+	}
+
+	resp := &resource.UpdateResponse{
+		State: tfsdk.State{
+			Schema: schemaResp.Schema,
+		},
+	}
+
+	r.Update(context.Background(), req, resp)
+
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected errors: %v", resp.Diagnostics)
+	}
+
+	if capturedOpts.Quota == nil {
+		t.Fatal("expected Quota to be set")
+	}
+
+	if *capturedOpts.Quota != int64(5497558138880) {
+		t.Errorf("expected quota 5497558138880 (5TiB in bytes), got %v", *capturedOpts.Quota)
 	}
 }
 

@@ -13,8 +13,9 @@ import (
 
 // Ensure interfaces are implemented.
 var (
-	_ basetypes.StringTypable  = SizeStringType{}
-	_ basetypes.StringValuable = SizeStringValue{}
+	_ basetypes.StringTypable                    = SizeStringType{}
+	_ basetypes.StringValuable                   = SizeStringValue{}
+	_ basetypes.StringValuableWithSemanticEquals = SizeStringValue{}
 )
 
 // SizeStringType is a custom type for size strings that compares by byte value.
