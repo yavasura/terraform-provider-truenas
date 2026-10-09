@@ -1,13 +1,14 @@
 # Terraform Provider for TrueNAS
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/deevus/terraform-provider-truenas)](https://github.com/deevus/terraform-provider-truenas/releases)
-[![Terraform Provider Downloads](https://img.shields.io/terraform/provider/dt/1361211)](https://registry.terraform.io/providers/deevus/truenas/latest)
-[![Go](https://img.shields.io/github/go-mod/go-version/deevus/terraform-provider-truenas)](go.mod)
-[![Go Report Card](https://goreportcard.com/badge/github.com/deevus/terraform-provider-truenas)](https://goreportcard.com/report/github.com/deevus/terraform-provider-truenas)
-[![Commercial Support](https://img.shields.io/badge/support-available-brightgreen)](#support)
 
 A Terraform provider for managing TrueNAS SCALE and Community editions.
+
+This fork is independently identified as `yavasura/truenas`, with Go module
+`github.com/yavasura/terraform-provider-truenas`. It originates from
+[deevus/terraform-provider-truenas](https://github.com/deevus/terraform-provider-truenas)
+and retains its GitHub fork relationship. The upstream MIT copyright and historical
+changelog are preserved; the `github.com/deevus/truenas-go` dependency remains unchanged.
 
 ## Installation
 
@@ -15,12 +16,33 @@ A Terraform provider for managing TrueNAS SCALE and Community editions.
 terraform {
   required_providers {
     truenas = {
-      source  = "deevus/truenas"
+      source  = "yavasura/truenas"
       version = "~> 0.1"
     }
   }
 }
 ```
+
+Registry installation requires a published `yavasura/truenas` release; publication
+is not established by this identity change. Until then, use a local build below.
+Choose a version constraint matching the releases actually available.
+
+## Migrating from deevus/truenas
+
+Back up your Terraform state securely and update `required_providers` to
+`yavasura/truenas`. Once the new provider is available, run in each workspace:
+
+```bash
+terraform state replace-provider \
+  registry.terraform.io/deevus/truenas \
+  registry.terraform.io/yavasura/truenas
+terraform init
+terraform plan
+```
+
+Review the replacement confirmation and plan before applying. This changes the
+provider address in state, not resource names or infrastructure. Do not rename
+`truenas_*` resources or the local provider name `truenas`.
 
 ## Build And Install
 
@@ -33,17 +55,17 @@ make install
 
 `make install` copies it to:
 
-`~/.terraform.d/plugins/registry.terraform.io/deevus/truenas/${VERSION}/${GOOS}_${GOARCH}/`
+`~/.terraform.d/plugins/registry.terraform.io/yavasura/truenas/${VERSION}/${GOOS}_${GOARCH}/`
 
 ## Terraform CLI Config
 
 For local provider development, copy [example.tfrc](example.tfrc) to `~/.terraformrc`.
 
-The included example already points at:
+Replace the placeholder path in the example with the absolute path to your checkout:
 
-`/Users/aurimas/Code/GitHub/yavasura/terraform-provider-truenas`
+`/absolute/path/to/terraform-provider-truenas`
 
-With that `dev_overrides` entry in place, any Terraform project that requests `deevus/truenas` will use the binary built in this repo root after you run `make build`.
+With that `dev_overrides` entry in place, any Terraform project that requests `yavasura/truenas` will use the binary built in this repo root after you run `make build`.
 
 ## Usage
 
@@ -73,16 +95,31 @@ resource "truenas_dataset" "example" {
 
 ## Documentation
 
-Full documentation is available on the [Terraform Registry](https://registry.terraform.io/providers/deevus/truenas/latest/docs).
+Provider documentation is available in [docs/index.md](docs/index.md). Once published,
+the registry address is [yavasura/truenas](https://registry.terraform.io/providers/yavasura/truenas/latest/docs).
 
 ## Requirements
 
 - TrueNAS SCALE or TrueNAS Community
-- SSH access with a user configured for `midclt`, `rm`, and `rmdir` (see [User Setup](https://registry.terraform.io/providers/deevus/truenas/latest/docs#truenas-user-setup))
+- SSH access with a user configured for `midclt`, `rm`, and `rmdir` (see [User Setup](docs/index.md#truenas-user-setup))
 
-## Support
+## Releases and signing
 
-Need help managing your TrueNAS infrastructure with Terraform? I offer implementation support, custom development, and training through my consultancy: [simonhartcher.com](https://simonhartcher.com). Email in bio.
+Releases target [yavasura/terraform-provider-truenas](https://github.com/yavasura/terraform-provider-truenas).
+Release automation is disabled until the repository variable `RELEASE_ENABLED` is
+set to `true`. Before enabling it:
+
+1. Create a signing key controlled by the fork maintainer. The upstream public key
+   is not this fork's signing identity and is not distributed here.
+2. Add the private key as the GitHub Actions secret `GPG_PRIVATE_KEY` (never commit
+   it). Export only its public key to `GPG_PUBLIC_KEY.asc`, record its fingerprint,
+   and register that public key with the Terraform Registry for `yavasura/truenas`.
+3. Confirm repository release permissions, registry namespace ownership, and the
+   registry's GitHub repository integration. Validate the GoReleaser configuration
+   and signed checksums before publishing a version tag.
+
+The workflow derives `GPG_FINGERPRINT` from the imported key. No fork signing key,
+registry registration, or published release is supplied by this identity change.
 
 ## License
 

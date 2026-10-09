@@ -3,7 +3,7 @@ package resources
 import (
 	"context"
 
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"

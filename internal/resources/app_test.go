@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deevus/terraform-provider-truenas/internal/services"
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/truenas-go/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -116,7 +116,10 @@ func TestAppResource_Schema(t *testing.T) {
 	}
 }
 
-// getAppResourceSchema returns the schema for the app resource
+// Create and Update fixtures must initialize both Config and Plan with this schema.
+// Tests without write-only values reuse the planned raw value as configuration;
+// write-only tests supply separate configuration because those values are not in the plan.
+// getAppResourceSchema returns the schema for the app resource.
 func getAppResourceSchema(t *testing.T) resource.SchemaResponse {
 	t.Helper()
 	r := NewAppResource()
@@ -419,6 +422,7 @@ func TestAppResource_Create_Success(t *testing.T) {
 	})
 
 	req := resource.CreateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		Plan: tfsdk.Plan{
 			Schema: schemaResp.Schema,
 			Raw:    planValue,
@@ -512,6 +516,7 @@ func TestAppResource_Create_WithComposeConfig(t *testing.T) {
 	})
 
 	req := resource.CreateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		Plan: tfsdk.Plan{
 			Schema: schemaResp.Schema,
 			Raw:    planValue,
@@ -554,6 +559,7 @@ func TestAppResource_Create_APIError(t *testing.T) {
 	})
 
 	req := resource.CreateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		Plan: tfsdk.Plan{
 			Schema: schemaResp.Schema,
 			Raw:    planValue,
@@ -780,6 +786,7 @@ func TestAppResource_Update_Success(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -944,7 +951,8 @@ func TestAppResource_Update_RefreshesComputedFieldsFromAPI(t *testing.T) {
 	}
 
 	req := resource.UpdateRequest{
-		State: state,
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planState.Raw},
+		State:  state,
 		Plan: tfsdk.Plan{
 			Schema: schemaResp.Schema,
 			Raw:    planState.Raw,
@@ -1030,6 +1038,7 @@ func TestAppResource_Update_APIError(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -1280,6 +1289,7 @@ func TestAppResource_Update_QueryErrorAfterUpdate(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -1332,6 +1342,7 @@ func TestAppResource_Update_AppNotFoundAfterUpdate(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -1659,6 +1670,7 @@ func TestAppResource_Update_ReconcileStateFromStoppedToRunning(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -1926,6 +1938,7 @@ func TestAppResource_Create_WithDesiredStateStopped(t *testing.T) {
 	})
 
 	req := resource.CreateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		Plan: tfsdk.Plan{
 			Schema: schemaResp.Schema,
 			Raw:    planValue,
@@ -2029,6 +2042,7 @@ func TestAppResource_Create_DesiredStateCasePreservation(t *testing.T) {
 			})
 
 			req := resource.CreateRequest{
+				Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 				Plan: tfsdk.Plan{
 					Schema: schemaResp.Schema,
 					Raw:    planValue,
@@ -2104,6 +2118,7 @@ func TestAppResource_Update_CrashedAppStartAttempt(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2169,6 +2184,7 @@ func TestAppResource_Update_CrashedAppDesiredStopped(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2250,6 +2266,7 @@ func TestAppResource_Update_RestartTriggersChange(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2310,6 +2327,7 @@ func TestAppResource_Update_RestartTriggersNoChangeNoRestart(t *testing.T) {
 	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", triggers)
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2370,6 +2388,7 @@ func TestAppResource_Update_RestartTriggersStoppedAppNoRestart(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2494,6 +2513,7 @@ func TestAppResource_Update_RestartTriggersAddedFirstTime(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2554,6 +2574,7 @@ func TestAppResource_Update_RestartTriggersRemoved(t *testing.T) {
 	planValue := customAppTriggersModelValue("myapp", "RUNNING", "", nil)
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2609,6 +2630,7 @@ func TestAppResource_Update_RestartTriggersStopError(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2674,6 +2696,7 @@ func TestAppResource_Update_RestartTriggersStartError(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,
@@ -2753,6 +2776,7 @@ func TestAppResource_Update_DesiredStateCasePreservation(t *testing.T) {
 	})
 
 	req := resource.UpdateRequest{
+		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: planValue},
 		State: tfsdk.State{
 			Schema: schemaResp.Schema,
 			Raw:    stateValue,

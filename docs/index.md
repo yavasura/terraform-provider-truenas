@@ -9,6 +9,12 @@ description: |-
 
 The TrueNAS provider enables Terraform to manage TrueNAS SCALE and Community editions through the midclt API over SSH.
 
+This provider is `yavasura/truenas`, an independently identified fork of
+[deevus/terraform-provider-truenas](https://github.com/deevus/terraform-provider-truenas).
+The GitHub fork relationship and upstream MIT attribution are retained.
+See the [migration instructions](https://github.com/yavasura/terraform-provider-truenas/blob/main/README.md#migrating-from-deevustruenas)
+before replacing an existing provider address in Terraform state.
+
 ## Features
 
 - **Storage**: Manage datasets, snapshots, and pools
@@ -27,7 +33,7 @@ The provider currently supports SSH key-based authentication.
 terraform {
   required_providers {
     truenas = {
-      source  = "deevus/truenas"
+      source  = "yavasura/truenas"
       version = "~> 0.1"
     }
   }
@@ -150,4 +156,4 @@ provider "truenas" {
 
 ## Changelog
 
-See [CHANGELOG.md](https://github.com/deevus/terraform-provider-truenas/blob/main/CHANGELOG.md) for release history.
+See [CHANGELOG.md](https://github.com/yavasura/terraform-provider-truenas/blob/main/CHANGELOG.md) for release history, including preserved upstream history.

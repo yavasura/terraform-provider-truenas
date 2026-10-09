@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	truenas "github.com/deevus/truenas-go"
-	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"

@@ -8,7 +8,7 @@ arch=$(go env GOARCH)
 
 go build -o "terraform-provider-truenas_v${VERSION}"
 
-plugin_dir="$HOME/.terraform.d/plugins/registry.terraform.io/local/truenas/${VERSION}/${os}_${arch}"
+plugin_dir="$HOME/.terraform.d/plugins/registry.terraform.io/yavasura/truenas/${VERSION}/${os}_${arch}"
 
 mkdir -p "$plugin_dir"
 cp "terraform-provider-truenas_v${VERSION}" "$plugin_dir/"

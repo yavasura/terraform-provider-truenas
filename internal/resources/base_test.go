@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"

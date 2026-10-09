@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/deevus/truenas-go/client"
-	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 )

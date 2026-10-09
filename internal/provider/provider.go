@@ -7,9 +7,9 @@ import (
 
 	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/truenas-go/client"
-	"github.com/deevus/terraform-provider-truenas/internal/datasources"
-	"github.com/deevus/terraform-provider-truenas/internal/resources"
-	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/yavasura/terraform-provider-truenas/internal/datasources"
+	"github.com/yavasura/terraform-provider-truenas/internal/resources"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"

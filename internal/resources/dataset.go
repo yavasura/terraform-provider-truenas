@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	truenas "github.com/deevus/truenas-go"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/deevus/terraform-provider-truenas/internal/services"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
 	truenas "github.com/deevus/truenas-go"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
