@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"

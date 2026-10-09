@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	truenas "github.com/deevus/truenas-go"
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"

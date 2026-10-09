@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/deevus/terraform-provider-truenas/internal/services"
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	truenas "github.com/deevus/truenas-go"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"

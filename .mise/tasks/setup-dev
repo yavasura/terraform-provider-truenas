@@ -24,7 +24,7 @@ fi
 cat > "$terraformrc" << EOF
 provider_installation {
   dev_overrides {
-    "registry.terraform.io/deevus/truenas" = "$provider_path"
+    "registry.terraform.io/yavasura/truenas" = "$provider_path"
   }
   direct {}
 }

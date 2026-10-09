@@ -47,6 +47,9 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 release:
+  github:
+    owner: yavasura
+    name: terraform-provider-truenas
   extra_files:
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'

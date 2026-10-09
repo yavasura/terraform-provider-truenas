@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/deevus/terraform-provider-truenas/internal/provider"
+	"github.com/yavasura/terraform-provider-truenas/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
@@ -18,7 +18,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/deevus/truenas",
+		Address: "registry.terraform.io/yavasura/truenas",
 		Debug:   debug,
 	}
 

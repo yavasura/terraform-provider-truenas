@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deevus/terraform-provider-truenas/internal/services"
-	customtypes "github.com/deevus/terraform-provider-truenas/internal/types"
+	"github.com/yavasura/terraform-provider-truenas/internal/services"
+	customtypes "github.com/yavasura/terraform-provider-truenas/internal/types"
 	truenas "github.com/deevus/truenas-go"
 	"github.com/deevus/truenas-go/client"
 	"github.com/hashicorp/terraform-plugin-framework/attr"

@@ -10,8 +10,8 @@ permissions:
 
 jobs:
   goreleaser:
-    # Only run on GitHub (not Forgejo)
-    if: github.server_url == 'https://github.com'
+    # Opt in only after configuring the fork's own signing key and registry.
+    if: github.server_url == 'https://github.com' && github.repository == 'yavasura/terraform-provider-truenas' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
